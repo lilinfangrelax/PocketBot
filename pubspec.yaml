@@ -1,0 +1,69 @@
+name: pocket_bot
+description: A modern mobile client for Agent Client Protocol (ACP) agents, built with Flutter.
+
+publish_to: 'none'
+
+version: 1.1.0
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: '>=3.10.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Core
+  cupertino_icons: ^1.0.2
+  provider: ^6.0.5
+  shared_preferences: ^2.2.2
+  google_fonts: ^6.1.0
+
+  # File handling
+  mime: ^1.0.4
+  dio: ^5.4.0
+  image_picker: ^1.0.4
+
+  # Networking
+  web_socket_channel: ^2.4.0
+  http: ^1.1.0
+  dartssh2: ^3.3.1
+
+  # Security
+  flutter_secure_storage: ^9.0.0
+
+  # OTA Updates
+  crypto: ^3.0.3
+  url_launcher: ^6.2.1
+  permission_handler: ^11.1.0
+  package_info_plus: ^5.0.1
+  path_provider: ^2.1.1
+  intl: ^0.18.1
+  logger: ^2.0.2
+  flutter_local_notifications: ^17.0.0
+  flutter_markdown: ^0.7.3
+  markdown: ^7.2.2
+
+  # Database
+  sqflite: ^2.3.0
+  path: ^1.8.3
+
+  # Utilities
+  uuid: ^4.2.1
+
+  # Tailscale - using network approach instead of package
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+  test: ^1.24.0
+
+  # Testing
+  mockito: ^5.4.2
+  build_runner: ^2.4.6
+  integration_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

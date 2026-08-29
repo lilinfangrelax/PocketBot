@@ -1,0 +1,19 @@
+# CODEOWNERS
+
+# These owners will be the default owners for everything in the repo
+* @yourusername
+
+# Unless a later match takes precedence, these owners will be requested for review
+# when someone opens a pull request.
+# *.md @docs-owner
+
+# Flutter code
+lib/ @yourusername
+test/ @yourusername
+
+# GitHub workflows
+.github/ @yourusername
+
+# Documentation
+README.md @yourusername
+docs/ @yourusername

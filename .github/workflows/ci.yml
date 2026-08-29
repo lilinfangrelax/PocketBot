@@ -1,0 +1,300 @@
+name: PocketBot CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.8'
+          channel: 'stable'
+
+      - name: Cache Flutter dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            build
+            .dart_tool
+          key: ${{ runner.os }}-flutter-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-flutter-
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Run unit tests
+        run: flutter test --coverage
+
+      - name: Upload coverage to Codecov
+        continue-on-error: true
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage/lcov.info
+          fail_ci_if_error: false
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test_results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  analyze:
+    name: Code Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.8'
+          channel: 'stable'
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Run analyzer
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Check formatting
+        continue-on-error: true
+        run: dart format --output=none --set-exit-if-changed lib test
+
+  build-android:
+    name: Build Android
+    runs-on: ubuntu-latest
+    needs: [test, analyze]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.8'
+          channel: 'stable'
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | tr -d '\r')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Prepare release APK
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk \
+            "PocketBot-${{ steps.version.outputs.version }}.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release.apk
+          path: PocketBot-${{ steps.version.outputs.version }}.apk
+          retention-days: 7
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="v${VERSION}"
+          APK="PocketBot-${VERSION}.apk"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" --clobber
+            echo "Updated APK on existing release $TAG"
+          else
+            gh release create "$TAG" "$APK" \
+              --title "PocketBot $TAG" \
+              --generate-notes \
+              --latest
+            echo "Created release $TAG"
+          fi
+
+  build-ios:
+    name: Build iOS
+    runs-on: macos-latest
+    needs: [test, analyze]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.8'
+          channel: 'stable'
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build iOS
+        run: flutter build ios --release --no-codesign
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build
+          path: build/ios/iphoneos/
+          retention-days: 7
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-2022
+    needs: [test, analyze]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.8'
+          channel: 'stable'
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build Windows
+        run: flutter build windows --release
+
+      - name: Get Version
+        id: version
+        run: |
+          $version = (Get-Content pubspec.yaml | Select-String "^version:").Line -replace "version: ","" -replace " \+.*",""
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Create ZIP Package
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $zipName = "PocketBot-Windows-$version.zip"
+
+          mkdir build-output
+          Copy-Item "build\windows\x64\runner\Release\*" -Recurse -Destination build-output\
+
+          # 添加版本文件
+          Set-Content -Path "build-output\version.txt" -Value $version
+          Set-Content -Path "build-output\RELEASE_NOTES.txt" -Value "PocketBot Windows Release v$version"
+
+          # Do not use a PowerShell here-string here: its body must start at
+          # column 0, which breaks YAML `run: |` indentation.
+          $readme = @(
+            '# PocketBot Windows Release',
+            '',
+            '## Install',
+            '1. Extract the zip to any folder',
+            '2. Run PocketBot.exe',
+            '',
+            '## Version',
+            "- Version: $version",
+            '- Flutter Version: 3.38.8',
+            '',
+            '## Changelog',
+            'See GitHub Releases'
+          ) -join [Environment]::NewLine
+          Set-Content -Path "build-output\README.txt" -Value $readme -Encoding utf8
+
+          # ZipFile::CreateFromDirectory produces Explorer-compatible entries
+          # (no "./" prefix). `tar -a -C dir .` stores ./file names that
+          # Windows Explorer cannot open.
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zipPath = Join-Path (Get-Location) $zipName
+          if (Test-Path $zipPath) { Remove-Item $zipPath }
+          [System.IO.Compression.ZipFile]::CreateFromDirectory(
+            (Resolve-Path "build-output").Path,
+            $zipPath,
+            [System.IO.Compression.CompressionLevel]::Optimal,
+            $false
+          )
+        shell: pwsh
+
+      - name: Upload Windows ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocketbot-windows-${{ steps.version.outputs.version }}
+          path: PocketBot-Windows-${{ steps.version.outputs.version }}.zip
+          retention-days: 7
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $tag = "v$version"
+          $zip = "PocketBot-Windows-$version.zip"
+          $uploaded = $false
+
+          for ($i = 0; $i -lt 18; $i++) {
+            gh release view $tag *> $null
+            if ($LASTEXITCODE -eq 0) {
+              gh release upload $tag $zip --clobber
+              if ($LASTEXITCODE -eq 0) {
+                Write-Host "Uploaded Windows ZIP to $tag"
+                $uploaded = $true
+                break
+              }
+            } else {
+              gh release create $tag $zip --title "PocketBot $tag" --generate-notes --latest
+              if ($LASTEXITCODE -eq 0) {
+                Write-Host "Created release $tag with Windows ZIP"
+                $uploaded = $true
+                break
+              }
+            }
+            Start-Sleep -Seconds 10
+          }
+
+          if (-not $uploaded) {
+            throw "Failed to publish Windows ZIP to $tag"
+          }
+
+  notify:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: [test, analyze, build-android, build-ios, build-windows]
+    if: failure()
+
+    steps:
+      - name: Send failure notification
+        run: |
+          echo "Build failed! Check the GitHub Actions workflow for details."
