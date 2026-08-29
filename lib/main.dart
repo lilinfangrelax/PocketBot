@@ -6,9 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pocket_bot/screens/main_screen.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/services/notification_service.dart';
-import 'package:pocket_bot/services/ota_service.dart';
 import 'package:pocket_bot/services/websocket_service.dart';
-import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/utils/version_utils.dart';
 
 /// User config provider for avatar changes
@@ -34,10 +32,7 @@ void main() {
   
   // Initialize notification service
   _initNotifications();
-  
-  // Initialize OTA service
-  _initOtaService();
-  
+
   runApp(
     MultiProvider(
       providers: [
@@ -55,22 +50,6 @@ Future<void> _initNotifications() async {
   final notificationService = NotificationService();
   await notificationService.initialize();
   await notificationService.requestPermissions();
-}
-
-Future<void> _initOtaService() async {
-  final otaService = OtaService();
-  
-  // Delay update check to let app start first
-  Future.delayed(const Duration(seconds: 3), () async {
-    try {
-      await otaService.checkForUpdates();
-      
-      // Clean up old update packages after check
-      await otaService.cleanupOldUpdates();
-    } catch (e) {
-      Logger.error('[Main] OTA check failed: $e');
-    }
-  });
 }
 
 /// Theme provider for dark mode support
