@@ -507,7 +507,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 hintText: 'ubuntu',
                 isDense: true,
               ),
-              onChanged: (value) => _manualUsername = value.trim(),
+              onChanged: (value) {
+                _manualUsername = value.trim();
+                setState(() {});
+              },
             ),
             const SizedBox(height: 8),
             TextFormField(
