@@ -10,6 +10,7 @@ import 'package:pocket_bot/main.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/utils/version_utils.dart';
+import 'package:pocket_bot/widgets/update_settings_card.dart';
 
 /// Settings screen
 class SettingsScreen extends StatefulWidget {
@@ -202,6 +203,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          const UpdateSettingsCard(),
 
           const SizedBox(height: 24),
 
@@ -226,7 +228,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             )
                           : CircleAvatar(
                               backgroundColor: Colors.blue.shade100,
-                              child: const Icon(Icons.person, color: Colors.blue),
+                              child:
+                                  const Icon(Icons.person, color: Colors.blue),
                             ),
                     ),
                   ),
@@ -295,9 +298,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: const Text('开源'),
                   subtitle: const Text('在 GitHub 上查看'),
                   trailing: const Icon(Icons.open_in_new),
-                  onTap: () {
-                    // TODO: Open GitHub link
-                  },
+                  onTap: () => UpdateDialogs.openRepo(),
                 ),
                 const Divider(),
                 ListTile(
@@ -450,10 +451,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ElevatedButton(
             onPressed: () async {
               await SessionStorage.clearAllSessions();
-              
+
               final wsService = context.read<ConnectionManager>().wsService;
               wsService.clearAllSessions();
-              
+
               Navigator.pop(context);
               _showSnackBar(context, '已清除全部会话');
             },

@@ -81,8 +81,6 @@ jobs:
     name: Build Android
     runs-on: ubuntu-latest
     needs: [test, analyze]
-    permissions:
-      contents: write
 
     steps:
       - name: Checkout code
@@ -124,26 +122,6 @@ jobs:
           path: PocketBot-${{ steps.version.outputs.version }}.apk
           retention-days: 7
 
-      - name: Publish GitHub Release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          TAG="v${VERSION}"
-          APK="PocketBot-${VERSION}.apk"
-
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$APK" --clobber
-            echo "Updated APK on existing release $TAG"
-          else
-            gh release create "$TAG" "$APK" \
-              --title "PocketBot $TAG" \
-              --generate-notes \
-              --latest
-            echo "Created release $TAG"
-          fi
-
   build-ios:
     name: Build iOS
     runs-on: macos-latest
@@ -176,8 +154,6 @@ jobs:
     name: Build Windows
     runs-on: windows-2022
     needs: [test, analyze]
-    permissions:
-      contents: write
 
     steps:
       - name: Checkout code
@@ -252,41 +228,6 @@ jobs:
           name: pocketbot-windows-${{ steps.version.outputs.version }}
           path: PocketBot-Windows-${{ steps.version.outputs.version }}.zip
           retention-days: 7
-
-      - name: Publish GitHub Release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: pwsh
-        run: |
-          $version = "${{ steps.version.outputs.version }}"
-          $tag = "v$version"
-          $zip = "PocketBot-Windows-$version.zip"
-          $uploaded = $false
-
-          for ($i = 0; $i -lt 18; $i++) {
-            gh release view $tag *> $null
-            if ($LASTEXITCODE -eq 0) {
-              gh release upload $tag $zip --clobber
-              if ($LASTEXITCODE -eq 0) {
-                Write-Host "Uploaded Windows ZIP to $tag"
-                $uploaded = $true
-                break
-              }
-            } else {
-              gh release create $tag $zip --title "PocketBot $tag" --generate-notes --latest
-              if ($LASTEXITCODE -eq 0) {
-                Write-Host "Created release $tag with Windows ZIP"
-                $uploaded = $true
-                break
-              }
-            }
-            Start-Sleep -Seconds 10
-          }
-
-          if (-not $uploaded) {
-            throw "Failed to publish Windows ZIP to $tag"
-          }
 
   notify:
     name: Notify on Failure

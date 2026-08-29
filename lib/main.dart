@@ -3,11 +3,15 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:pocket_bot/config/update_config.dart';
 import 'package:pocket_bot/screens/main_screen.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
+import 'package:pocket_bot/services/github_update_service.dart';
 import 'package:pocket_bot/services/notification_service.dart';
 import 'package:pocket_bot/services/websocket_service.dart';
+import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/utils/version_utils.dart';
+import 'package:pocket_bot/widgets/update_settings_card.dart';
 
 /// User config provider for avatar changes
 class UserConfigProvider with ChangeNotifier {
@@ -24,14 +28,16 @@ class UserConfigProvider with ChangeNotifier {
   }
 }
 
-void main() {
+final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // Initialize app version info
-  AppVersion.init();
-  
-  // Initialize notification service
+
+  await AppVersion.init();
+  await UpdateConfig.load();
+
   _initNotifications();
+  _scheduleUpdateCheck();
 
   runApp(
     MultiProvider(
@@ -52,19 +58,36 @@ Future<void> _initNotifications() async {
   await notificationService.requestPermissions();
 }
 
+void _scheduleUpdateCheck() {
+  Future<void>.delayed(const Duration(seconds: 3), () async {
+    final service = GithubUpdateService();
+    try {
+      final result = await service.checkForUpdates();
+      if (result == null || !result.updateAvailable) return;
+      final context = appNavigatorKey.currentContext;
+      if (context == null || !context.mounted) return;
+      await UpdateDialogs.showAvailable(context, result, service: service);
+    } catch (e) {
+      Logger.warning('[Main] Update check failed: $e');
+    } finally {
+      service.close();
+    }
+  });
+}
+
 /// Theme provider for dark mode support
 class ThemeProvider with ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.system;
-  
+
   ThemeMode get themeMode => _themeMode;
-  
+
   Future<void> loadTheme() async {
     final prefs = await SharedPreferences.getInstance();
     final themeIndex = prefs.getInt('theme_mode') ?? 0;
     _themeMode = ThemeMode.values[themeIndex];
     notifyListeners();
   }
-  
+
   Future<void> setThemeMode(ThemeMode mode) async {
     _themeMode = mode;
     final prefs = await SharedPreferences.getInstance();
@@ -93,6 +116,7 @@ class _PocketBotAppState extends State<PocketBotApp> {
 
     return MaterialApp(
       title: 'PocketBot',
+      navigatorKey: appNavigatorKey,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: Colors.blue,
