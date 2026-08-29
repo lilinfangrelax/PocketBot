@@ -3,7 +3,7 @@ description: A modern mobile client for Agent Client Protocol (ACP) agents, buil
 
 publish_to: 'none'
 
-version: 1.1.0
+version: 1.1.1
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
