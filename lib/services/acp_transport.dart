@@ -155,9 +155,10 @@ String opensshPathToWindows(String path) {
   final slash = path.replaceAll('\\', '/');
   final match = RegExp(r'^/([a-zA-Z]):/?(.*)$').firstMatch(slash);
   if (match == null) return path;
+  final drive = match.group(1)!.toUpperCase();
   final rest = match.group(2)!;
-  if (rest.isEmpty) return '${match.group(1)}:\\';
-  return '${match.group(1)}:\\${rest.replaceAll('/', r'\')}';
+  if (rest.isEmpty) return '$drive:\\';
+  return '$drive:\\${rest.replaceAll('/', r'\')}';
 }
 
 /// SFTP on Windows OpenSSH prefers forward slashes (`C:/Users`).
