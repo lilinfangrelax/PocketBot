@@ -71,6 +71,11 @@ ehthumbs.db
 *.jks
 *.keystore
 
+# Stable release certificate. GitHub Release builds must keep signing with
+# this identity so Android can install updates over an existing app.
+!signing/key.properties
+!signing/pocketbot-release.jks
+
 # Logs
 *.log
 flutter.log
