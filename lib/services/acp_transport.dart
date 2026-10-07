@@ -145,6 +145,21 @@ bool looksLikeWindowsPath(String path) {
   return RegExp(r'^[a-zA-Z]:[\\/]').hasMatch(path) || path.startsWith(r'\\');
 }
 
+/// Windows OpenSSH SFTP addresses a drive as `/d:/` rather than `D:\`.
+bool isOpensshWindowsPath(String path) {
+  return RegExp(r'^/[a-zA-Z]:(?:/|$)').hasMatch(path.replaceAll('\\', '/'));
+}
+
+/// Converts `/d:/Work` to `D:\Work` for `cmd /c`. Other paths are unchanged.
+String opensshPathToWindows(String path) {
+  final slash = path.replaceAll('\\', '/');
+  final match = RegExp(r'^/([a-zA-Z]):/?(.*)$').firstMatch(slash);
+  if (match == null) return path;
+  final rest = match.group(2)!;
+  if (rest.isEmpty) return '${match.group(1)}:\\';
+  return '${match.group(1)}:\\${rest.replaceAll('/', r'\')}';
+}
+
 /// SFTP on Windows OpenSSH prefers forward slashes (`C:/Users`).
 String toSftpPath(String path) => path.replaceAll('\\', '/');
 
@@ -152,6 +167,10 @@ String joinRemotePath(String parent, String name) {
   if (name.isEmpty || name == '.') return parent;
   if (name == '..') return parentRemotePath(parent);
   if (parent.isEmpty || parent == '/') return '/$name';
+  if (isOpensshWindowsPath(parent)) {
+    final base = parent.replaceAll('\\', '/').replaceAll(RegExp(r'/+$'), '');
+    return '$base/$name';
+  }
   if (looksLikeWindowsPath(parent) || parent.contains('\\')) {
     final trimmed = parent.replaceAll(RegExp(r'[\\/]+$'), '');
     return '$trimmed\\$name';
@@ -160,6 +179,14 @@ String joinRemotePath(String parent, String name) {
 }
 
 String parentRemotePath(String path) {
+  if (isOpensshWindowsPath(path)) {
+    var slash = path.replaceAll('\\', '/').replaceAll(RegExp(r'/+$'), '');
+    if (RegExp(r'^/[a-zA-Z]:$').hasMatch(slash)) return '$slash/';
+    final index = slash.lastIndexOf('/');
+    final parent = slash.substring(0, index);
+    if (RegExp(r'^/[a-zA-Z]:$').hasMatch(parent)) return '$parent/';
+    return parent;
+  }
   final normalized = path.replaceAll(RegExp(r'[\\/]+$'), '');
   if (normalized.isEmpty) return '/';
   if (RegExp(r'^[a-zA-Z]:$').hasMatch(normalized)) {
@@ -183,7 +210,8 @@ bool isRemoteRoot(String path) {
   return trimmed.isEmpty ||
       trimmed == '/' ||
       trimmed == '.' ||
-      RegExp(r'^[a-zA-Z]:[\\/]?$').hasMatch(trimmed);
+      RegExp(r'^[a-zA-Z]:[\\/]?$').hasMatch(trimmed) ||
+      RegExp(r'^/[a-zA-Z]:/?$').hasMatch(trimmed.replaceAll('\\', '/'));
 }
 
 String shQuote(String value) {
@@ -197,7 +225,9 @@ String buildRemoteAgentCommand({
   required String command,
   required List<String> args,
 }) {
-  final cwd = workingDirectory.trim().isEmpty ? '.' : workingDirectory;
+  final cwd = opensshPathToWindows(
+    workingDirectory.trim().isEmpty ? '.' : workingDirectory,
+  );
   if (looksLikeWindowsPath(cwd)) {
     final joined = [command, ...args].join(' ');
     final escaped = cwd.replaceAll('"', '');

@@ -31,6 +31,15 @@ class _FakeRemoteDirs implements RemoteDirectorySource {
 }
 
 void main() {
+  test('socket abort is explained without the raw SSH error', () {
+    expect(
+      friendlyDirectoryError(
+        'SSHSocketError(SocketSoftware caused connection abort, errno = 103)',
+      ),
+      'SSH 连接已中断，请返回后重新登录',
+    );
+  });
+
   testWidgets('SSH directory picker returns the chosen folder', (tester) async {
     String? chosen;
     await tester.pumpWidget(

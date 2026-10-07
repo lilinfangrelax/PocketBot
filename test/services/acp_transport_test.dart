@@ -118,5 +118,24 @@ void main() {
       expect(isRemoteRoot(r'C:\'), isTrue);
       expect(toSftpPath(r'C:\Users\me'), 'C:/Users/me');
     });
+
+    test('treats OpenSSH drive roots as Windows directories', () {
+      expect(isRemoteRoot('/d:/'), isTrue);
+      expect(isRemoteRoot('/d:'), isTrue);
+      expect(isRemoteRoot('/d:/Archive'), isFalse);
+      expect(parentRemotePath('/d:/foo/bar'), '/d:/foo');
+      expect(parentRemotePath('/d:/foo'), '/d:/');
+      expect(joinRemotePath('/d:/', 'Archive'), '/d:/Archive');
+      expect(joinRemotePath('/d:/foo', 'bar'), '/d:/foo/bar');
+      expect(opensshPathToWindows('/d:/work'), r'D:\work');
+      expect(
+        buildRemoteAgentCommand(
+          workingDirectory: '/d:/work',
+          command: 'agent',
+          args: const ['acp'],
+        ),
+        r'cmd /c "cd /d D:\work && agent acp"',
+      );
+    });
   });
 }

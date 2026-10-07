@@ -5,6 +5,32 @@ import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/services/acp_transport.dart';
 import 'package:pocket_bot/utils/logger.dart';
 
+/// Turns a dropped Tailscale/SSH socket into a short message.
+String friendlyDirectoryError(Object error) {
+  final text = error.toString().replaceFirst('Exception: ', '');
+  final lower = text.toLowerCase();
+  if (lower.contains('连接已中断') ||
+      lower.contains('sshsocketerror') ||
+      lower.contains('connection abort') ||
+      lower.contains('connection reset') ||
+      lower.contains('broken pipe')) {
+    return 'SSH 连接已中断，请返回后重新登录';
+  }
+  if (text.startsWith('无法列出目录')) return text;
+  return '无法列出目录: $text';
+}
+
+bool isSshSocketFailure(Object error) {
+  final lower = error.toString().toLowerCase();
+  return lower.contains('sshsocketerror') ||
+      lower.contains('connection abort') ||
+      lower.contains('connection reset') ||
+      lower.contains('broken pipe') ||
+      lower.contains('connection closed') ||
+      lower.contains('errno = 103') ||
+      lower.contains('errno = 104');
+}
+
 class SshRemoteEntry {
   final String name;
   final bool isDirectory;
@@ -25,10 +51,11 @@ abstract class RemoteDirectorySource {
 /// SSH login plus SFTP (or shell) directory listing. The same [SSHClient]
 /// is later reused to spawn `agent acp` in the chosen working directory.
 class SshRemoteSession implements RemoteDirectorySource {
-  SshRemoteSession._(this._client);
+  SshRemoteSession._(this._client, this._target);
 
   SSHClient? _client;
   SftpClient? _sftp;
+  final GatewayInfo _target;
   bool _ownsClient = true;
 
   SSHClient get client {
@@ -41,7 +68,7 @@ class SshRemoteSession implements RemoteDirectorySource {
 
   static Future<SshRemoteSession> connect(GatewayInfo target) async {
     final client = await openSshClient(target);
-    return SshRemoteSession._(client);
+    return SshRemoteSession._(client, target);
   }
 
   @override
@@ -87,6 +114,22 @@ class SshRemoteSession implements RemoteDirectorySource {
       return await _listViaSftp(path);
     } catch (error) {
       Logger.debug('[SSH] SFTP listdir failed for $path: $error');
+      _sftp = null;
+      if (isSshSocketFailure(error)) {
+        if (!await _reconnect()) {
+          throw Exception('SSH 连接已中断，请返回后重新登录');
+        }
+        try {
+          return await _listViaSftp(path);
+        } catch (retry) {
+          Logger.debug('[SSH] SFTP listdir retry failed for $path: $retry');
+          _sftp = null;
+          if (isSshSocketFailure(retry)) {
+            throw Exception('SSH 连接已中断，请返回后重新登录');
+          }
+          return _listViaShell(path);
+        }
+      }
       return _listViaShell(path);
     }
   }
@@ -108,6 +151,17 @@ class SshRemoteSession implements RemoteDirectorySource {
   }
 
   Future<List<SshRemoteEntry>> _listViaShell(String path) async {
+    final windows = opensshPathToWindows(path);
+    if (looksLikeWindowsPath(windows)) {
+      var dirPath = windows.replaceAll('"', '');
+      if (RegExp(r'^[a-zA-Z]:\\$').hasMatch(dirPath)) {
+        dirPath = dirPath.substring(0, 2);
+      }
+      final output = utf8.decode(
+        await client.run('cmd /c "dir /b /ad $dirPath"'),
+      );
+      return _parseDir(output);
+    }
     final quoted = shQuote(path);
     try {
       final output = utf8.decode(
@@ -158,6 +212,22 @@ class SshRemoteSession implements RemoteDirectorySource {
   Future<SftpClient> _ensureSftp() async {
     _sftp ??= await client.sftp();
     return _sftp!;
+  }
+
+  Future<bool> _reconnect() async {
+    if (!_ownsClient) return false;
+    try {
+      _client?.close();
+    } catch (_) {}
+    _client = null;
+    _sftp = null;
+    try {
+      _client = await openSshClient(_target);
+      return true;
+    } catch (error) {
+      Logger.debug('[SSH] Reconnect failed: $error');
+      return false;
+    }
   }
 
   Future<SshStdioTransport> startAgent(GatewayInfo target) async {

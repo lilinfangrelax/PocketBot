@@ -25,6 +25,7 @@ class _RemoteDirectoryPickerState extends State<RemoteDirectoryPicker> {
   List<SshRemoteEntry> _entries = const [];
   bool _loading = true;
   String? _error;
+  int _request = 0;
 
   @override
   void initState() {
@@ -56,13 +57,14 @@ class _RemoteDirectoryPickerState extends State<RemoteDirectoryPicker> {
   }
 
   Future<void> _load(String path) async {
+    final request = ++_request;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
       final entries = await widget.source.listDirectory(path);
-      if (!mounted) return;
+      if (!mounted || request != _request) return;
       setState(() {
         _path = path;
         _pathController.text = path;
@@ -70,10 +72,10 @@ class _RemoteDirectoryPickerState extends State<RemoteDirectoryPicker> {
         _loading = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || request != _request) return;
       setState(() {
         _loading = false;
-        _error = '无法列出目录: ${error.toString().replaceFirst('Exception: ', '')}';
+        _error = friendlyDirectoryError(error);
       });
     }
   }
