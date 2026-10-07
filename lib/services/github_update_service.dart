@@ -6,6 +6,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:pocket_bot/config/update_config.dart';
+import 'package:pocket_bot/services/asset_download.dart';
 import 'package:pocket_bot/services/github_release_client.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/utils/version_utils.dart';
@@ -64,38 +65,120 @@ class GithubUpdateService {
     GithubAsset asset, {
     void Function(double progress)? onProgress,
   }) async {
-    try {
-      final directory = await getTemporaryDirectory();
-      final file = File('${directory.path}/${asset.name}');
-      if (await file.exists()) {
-        await file.delete();
-      }
+    final name = asset.name.split(RegExp(r'[/\\]')).last;
+    if (name.isEmpty || asset.downloadUrl.isEmpty) return null;
 
-      await _dio.download(
-        asset.downloadUrl,
-        file.path,
-        onReceiveProgress: (received, total) {
-          if (onProgress == null) return;
-          if (total > 0) {
-            onProgress(received / total);
-          }
-        },
-        options: Options(
-          headers: {
-            'User-Agent': 'PocketBot',
-            'Accept': 'application/octet-stream',
-          },
-          followRedirects: true,
-        ),
-      );
+    final directory = await getTemporaryDirectory();
+    final finished = File('${directory.path}/$name');
+    final partial = File('${directory.path}/$name.partial');
 
-      if (!await file.exists()) return null;
-      Logger.info('[Update] Downloaded ${file.path}');
-      return file;
-    } catch (e) {
-      Logger.error('[Update] Download failed: $e');
-      return null;
+    if (asset.size > 0 &&
+        await finished.exists() &&
+        await finished.length() == asset.size) {
+      onProgress?.call(1);
+      return finished;
     }
+
+    Object? lastError;
+    for (var attempt = 0; attempt < 6; attempt++) {
+      try {
+        final file = await _downloadOnce(asset, finished, partial, onProgress);
+        if (file != null) return file;
+      } catch (error) {
+        lastError = error;
+        Logger.warning(
+          '[Update] Download attempt ${attempt + 1} failed: $error',
+        );
+        if (attempt < 5) {
+          await Future<void>.delayed(Duration(seconds: attempt + 1));
+        }
+      }
+    }
+    Logger.error('[Update] Download failed: $lastError');
+    return null;
+  }
+
+  Future<File?> _downloadOnce(
+    GithubAsset asset,
+    File finished,
+    File partial,
+    void Function(double progress)? onProgress,
+  ) async {
+    final localBytes = await partial.exists() ? await partial.length() : 0;
+    final plan = planAssetDownload(
+      localBytes: localBytes,
+      assetSize: asset.size,
+    );
+    if (plan.complete) {
+      onProgress?.call(1);
+      if (await finished.exists()) await finished.delete();
+      return partial.rename(finished.path);
+    }
+    if (plan.offset == 0 && localBytes > 0 && await partial.exists()) {
+      await partial.delete();
+    }
+    if (plan.offset > 0) {
+      final total = asset.size;
+      if (onProgress != null && total > 0) onProgress(plan.offset / total);
+    }
+
+    final headers = <String, dynamic>{
+      'User-Agent': 'PocketBot',
+      'Accept': 'application/octet-stream',
+    };
+    if (plan.offset > 0) {
+      headers['Range'] = 'bytes=${plan.offset}-';
+    }
+
+    final response = await _dio.get<ResponseBody>(
+      asset.downloadUrl,
+      options: Options(
+        headers: headers,
+        responseType: ResponseType.stream,
+        followRedirects: true,
+        maxRedirects: 5,
+        connectTimeout: const Duration(seconds: 20),
+        receiveTimeout: const Duration(seconds: 40),
+        validateStatus: (code) => code == 200 || code == 206 || code == 416,
+      ),
+    );
+
+    if (response.statusCode == 416) {
+      if (await partial.exists()) await partial.delete();
+      throw StateError('Range not satisfiable');
+    }
+
+    final append = plan.offset > 0 && responseAppendsFromOffset(response.statusCode);
+    final body = response.data;
+    if (body == null) {
+      throw StateError('Empty download response');
+    }
+
+    var written = append ? plan.offset : 0;
+    final output = await partial.open(
+      mode: append ? FileMode.append : FileMode.write,
+    );
+    try {
+      await for (final chunk in body.stream) {
+        await output.writeFrom(chunk);
+        written += chunk.length;
+        final total = asset.size > 0 ? asset.size : written;
+        if (onProgress != null && total > 0) {
+          onProgress((written / total).clamp(0, 1).toDouble());
+        }
+      }
+    } finally {
+      await output.close();
+    }
+
+    final size = await partial.length();
+    if (asset.size > 0 && size < asset.size) {
+      throw StateError('Incomplete download $size/${asset.size}');
+    }
+    if (await finished.exists()) await finished.delete();
+    final saved = await partial.rename(finished.path);
+    Logger.info('[Update] Downloaded ${saved.path}');
+    return saved;
   }
 
   Future<bool> installOrOpen(File file) async {

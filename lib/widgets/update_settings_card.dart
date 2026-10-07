@@ -260,7 +260,7 @@ class UpdateDialogs {
       if (file == null) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('下载失败')),
+            const SnackBar(content: Text('下载中断，再次检查更新会接着下载')),
           );
         }
         return;
