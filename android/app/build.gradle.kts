@@ -37,7 +37,9 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
+        // versionCode is derived from the semver name. Do not use the `+`
+        // build number from pubspec.yaml; that counter resets across releases.
+        versionCode = androidVersionCode(flutter.versionName)
         versionName = flutter.versionName
     }
 
@@ -71,4 +73,25 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+}
+
+// Keep this in sync with lib/utils/android_version_code.dart.
+fun androidVersionCode(versionName: String): Int {
+    val withoutBuild = versionName.substringBefore('+').trim().removePrefix("v")
+    val match = Regex("""^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.]+))?$""").find(withoutBuild)
+        ?: return 1
+    val major = match.groupValues[1].toInt()
+    val minor = match.groupValues[2].toInt()
+    val patch = match.groupValues[3].toInt()
+    return major * 10_000_000 + minor * 100_000 + patch * 1_000 +
+        androidPreReleaseCode(match.groupValues[4])
+}
+
+fun androidPreReleaseCode(pre: String): Int {
+    if (pre.isEmpty()) return 900
+    val beta = Regex("""^beta\.(\d+)$""").find(pre)
+    if (beta != null) return beta.groupValues[1].toInt().coerceIn(1, 499)
+    val rc = Regex("""^rc\.(\d+)$""").find(pre)
+    if (rc != null) return 500 + rc.groupValues[1].toInt().coerceIn(1, 399)
+    return 1
 }

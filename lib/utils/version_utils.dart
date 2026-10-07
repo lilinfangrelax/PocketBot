@@ -12,12 +12,10 @@ class AppVersion {
   /// Get base version (e.g., "1.0.0")
   static String get baseVersion => _packageInfo?.version ?? '1.0.0';
 
-  /// Get build number (e.g., "dev_20260214_103100")
-  /// This comes from --build-name parameter in flutter build
+  /// Android versionCode. This is not part of the user-facing version.
   static String get buildNumber => _packageInfo?.buildNumber ?? '';
 
-  /// Get full version string
-  /// Format: "1.0.0+dev_20260214_103100" or just "1.0.0" if no build number
+  /// Semantic version plus the Android versionCode, when one is present.
   static String get fullVersion {
     final version = baseVersion;
     final build = buildNumber;
@@ -25,12 +23,6 @@ class AppVersion {
     return '$version+$build';
   }
 
-  /// Get display version (user-friendly format)
-  /// Format: "v1.0.0 (dev_20260214_103100)" or "v1.0.0"
-  static String get displayVersion {
-    final version = baseVersion;
-    final build = buildNumber;
-    if (build.isEmpty) return 'v$version';
-    return 'v$version ($build)';
-  }
+  /// User-facing version. The Android versionCode stays out of this string.
+  static String get displayVersion => 'v$baseVersion';
 }

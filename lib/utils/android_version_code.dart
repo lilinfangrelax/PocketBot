@@ -1,0 +1,37 @@
+/// Android [versionCode] derived from a semantic version.
+///
+/// The number after `+` in `pubspec.yaml` is not used. Android only accepts
+/// an integer that must increase on every install, so a later `1.2.1-beta.1`
+/// cannot reuse build number 1.
+///
+/// Layout: `major * 10000000 + minor * 100000 + patch * 1000 + pre`.
+/// `pre` is 1–499 for `beta.N`, 501–899 for `rc.N`, and 900 for a stable release.
+int androidVersionCode(String versionName) {
+  final withoutBuild = versionName.split('+').first.trim();
+  final match = RegExp(
+    r'^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.]+))?$',
+  ).firstMatch(withoutBuild);
+  if (match == null) return 1;
+
+  final major = int.parse(match.group(1)!);
+  final minor = int.parse(match.group(2)!);
+  final patch = int.parse(match.group(3)!);
+  final pre = match.group(4) ?? '';
+  return major * 10000000 + minor * 100000 + patch * 1000 + _preReleaseCode(pre);
+}
+
+int _preReleaseCode(String pre) {
+  if (pre.isEmpty) return 900;
+
+  final beta = RegExp(r'^beta\.(\d+)$').firstMatch(pre);
+  if (beta != null) {
+    return int.parse(beta.group(1)!).clamp(1, 499);
+  }
+
+  final rc = RegExp(r'^rc\.(\d+)$').firstMatch(pre);
+  if (rc != null) {
+    return 500 + int.parse(rc.group(1)!).clamp(1, 399);
+  }
+
+  return 1;
+}
