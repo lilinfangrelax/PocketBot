@@ -12,6 +12,7 @@ import 'package:pocket_bot/models/session_state.dart';
 import 'package:pocket_bot/services/acp_transport.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
 import 'package:pocket_bot/services/notification_service.dart';
+import 'package:pocket_bot/utils/acp_stream_text.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -1232,14 +1233,14 @@ class WebSocketService with ChangeNotifier {
       }
     } else if (kind == 'agent_thought_chunk') {
       final text = _contentToText(update['content']);
-      if (text.isEmpty) return;
+      if (text.isEmpty || isLeakedAgentErrorOnly(text)) return;
       _upsertSpecialMessage(
         session,
         id: 'thought-${session.currentRunId ?? session.sessionKey}',
         kind: MessageKind.thought,
-        text: text,
+        text: stripLeakedAgentError(text),
         append: true,
-        streaming: true,
+        streaming: _promptInFlight,
       );
     } else if (kind == 'tool_call' || kind == 'tool_call_update') {
       _upsertToolCall(session, update);
@@ -1302,7 +1303,8 @@ class WebSocketService with ChangeNotifier {
       text: text,
       toolCallId: toolCallId,
       toolStatus: status,
-      streaming: status == 'pending' || status == 'in_progress',
+      streaming: _promptInFlight &&
+          (status == 'pending' || status == 'in_progress'),
     );
   }
 
@@ -1372,12 +1374,18 @@ class WebSocketService with ChangeNotifier {
     }
   }
 
+  bool get _promptInFlight => _pendingPromptSessions.isNotEmpty;
+
   void _appendAgentChunk(
     SessionState session,
     String messageId,
     String text, {
     Attachment? attachment,
   }) {
+    if (attachment == null && isLeakedAgentErrorOnly(text)) {
+      _sawLeakedStreamError = true;
+      return;
+    }
     final previousId = session.currentRunId;
     if (previousId != null && previousId != messageId) {
       final previousIndex =
@@ -1391,6 +1399,7 @@ class WebSocketService with ChangeNotifier {
       }
     }
     session.currentRunId = messageId;
+    final streaming = _promptInFlight;
     final index =
         session.messages.indexWhere((m) => !m.isUser && m.id == messageId);
     if (index >= 0) {
@@ -1400,10 +1409,16 @@ class WebSocketService with ChangeNotifier {
         attachments: attachment == null
             ? old.attachments
             : [...old.attachments, attachment],
-        isStreaming: true,
+        isStreaming: streaming,
       );
-      session.patchStreamingMessage(updated);
-      _publishLiveText(messageId, updated.text);
+      if (streaming) {
+        session.patchStreamingMessage(updated);
+        _publishLiveText(messageId, updated.text);
+      } else {
+        _liveText.remove(messageId);
+        _streamText.remove(messageId);
+        session.updateMessage(updated);
+      }
     } else {
       final initial = _appendStreamText(messageId, '', text);
       final message = Message(
@@ -1411,12 +1426,12 @@ class WebSocketService with ChangeNotifier {
         text: initial,
         isUser: false,
         timestamp: DateTime.now(),
-        isStreaming: true,
+        isStreaming: streaming,
         attachments: attachment == null ? const [] : [attachment],
       );
       session.addMessage(message);
       _messageController.add(message);
-      _publishLiveText(messageId, initial);
+      if (streaming) _publishLiveText(messageId, initial);
     }
   }
 
@@ -1426,6 +1441,12 @@ class WebSocketService with ChangeNotifier {
       () => StringBuffer(current),
     );
     buffer.write(chunk);
+    final cleaned = stripLeakedAgentError(buffer.toString());
+    if (cleaned != buffer.toString()) {
+      buffer
+        ..clear()
+        ..write(cleaned);
+    }
     return buffer.toString();
   }
 
@@ -1442,29 +1463,56 @@ class WebSocketService with ChangeNotifier {
     streamingTick.value++;
   }
 
+  bool _sawLeakedStreamError = false;
+  static const _interruptedReplyText = '这次回复中断了，请再发送一次。';
+
   void _finishStreamingMessage(SessionState session) {
     final id = session.currentRunId;
-    if (id == null) return;
-    final index = session.messages.indexWhere((m) => m.id == id && !m.isUser);
-    if (index >= 0) {
-      final live = _liveText[id] ?? _streamText[id]?.toString();
-      final message = session.messages[index].copyWith(
-        text: live ?? session.messages[index].text,
-        isStreaming: false,
-      );
-      _liveText.remove(id);
-      _streamText.remove(id);
-      session.updateMessage(message);
-      streamingTick.value++;
-      if (_activeSessionKey != session.sessionKey && message.text.isNotEmpty) {
-        NotificationService().showMessageNotification(
-          sessionKey: session.sessionKey,
-          sessionName: session.displayTitle,
-          message: message.text,
+    if (id != null) {
+      final index = session.messages.indexWhere((m) => m.id == id && !m.isUser);
+      if (index >= 0) {
+        final live = stripLeakedAgentError(
+          _liveText[id] ??
+              _streamText[id]?.toString() ??
+              session.messages[index].text,
         );
+        final text = live.trim().isEmpty ? _interruptedReplyText : live;
+        final message = session.messages[index].copyWith(
+          text: text,
+          isStreaming: false,
+        );
+        _liveText.remove(id);
+        _streamText.remove(id);
+        session.updateMessage(message);
+        streamingTick.value++;
+        if (_activeSessionKey != session.sessionKey &&
+            message.text.isNotEmpty) {
+          NotificationService().showMessageNotification(
+            sessionKey: session.sessionKey,
+            sessionName: session.displayTitle,
+            message: message.text,
+          );
+        }
       }
+    } else if (_sawLeakedStreamError) {
+      final notice = Message(
+        id: _generateId(),
+        text: _interruptedReplyText,
+        isUser: false,
+        timestamp: DateTime.now(),
+      );
+      session.addMessage(notice);
+      _messageController.add(notice);
     }
+    _sawLeakedStreamError = false;
     session.currentRunId = null;
+    for (final message in List<Message>.of(session.messages)) {
+      if (message.isUser || !message.isStreaming) continue;
+      _liveText.remove(message.id);
+      _streamText.remove(message.id);
+      session.updateMessage(message.copyWith(isStreaming: false));
+    }
+    streamingTick.value++;
     SessionStorage.saveSession(session.toChatSession());
   }
 
@@ -1518,12 +1566,17 @@ class WebSocketService with ChangeNotifier {
   }
 
   void _failPending(Object error) {
+    final promptSessions = _pendingPromptSessions.values.toSet();
     for (final completer in _pendingRpc.values) {
       if (!completer.isCompleted) completer.completeError(error);
     }
     _pendingRpc.clear();
     _pendingPromptSessions.clear();
     _pendingUserMessages.clear();
+    for (final key in promptSessions) {
+      final session = _sessions[key];
+      if (session != null) _finishStreamingMessage(session);
+    }
   }
 
   void _setError(String error) {

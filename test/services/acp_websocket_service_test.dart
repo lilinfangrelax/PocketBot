@@ -561,6 +561,65 @@ void main() {
 
     expect(service.getSession('session-1')!.messages.single.text, 'Hello');
   });
+
+  test('drops leaked stream errors and settles without stopReason', () async {
+    final transport = _FakeAcpTransport();
+    final service = WebSocketService();
+    addTearDown(() async {
+      await service.disconnect();
+      await transport.close();
+    });
+
+    await _connectFake(service, transport);
+    final sending = service.sendMessage('Hi');
+    await transport.waitForMethod('session/new');
+    transport.respondToLast({'sessionId': 'session-1'});
+    await sending;
+    final prompt = transport.sent.lastWhere(
+      (message) => message['method'] == 'session/prompt',
+    );
+
+    transport.push({
+      'jsonrpc': '2.0',
+      'method': 'session/update',
+      'params': {
+        'sessionId': 'session-1',
+        'update': {
+          'sessionUpdate': 'agent_message_chunk',
+          'messageId': 'agent-1',
+          'content': {'type': 'text', 'text': '嗯，我在。'},
+        },
+      },
+    });
+    transport.push({
+      'jsonrpc': '2.0',
+      'method': 'session/update',
+      'params': {
+        'sessionId': 'session-1',
+        'update': {
+          'sessionUpdate': 'agent_message_chunk',
+          'messageId': 'agent-1',
+          'content': {
+            'type': 'text',
+            'text': '\n\nError: RetriableError: WritableIterable is closed',
+          },
+        },
+      },
+    });
+    transport.push({
+      'jsonrpc': '2.0',
+      'id': prompt['id'],
+      'result': <String, dynamic>{},
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+
+    final agent = service
+        .getSession('session-1')!
+        .messages
+        .lastWhere((message) => !message.isUser);
+    expect(agent.text, '嗯，我在。');
+    expect(agent.isStreaming, isFalse);
+  });
 }
 
 Future<void> _connectFake(

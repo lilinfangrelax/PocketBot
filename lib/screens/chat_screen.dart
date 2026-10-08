@@ -619,6 +619,14 @@ class _ChatScreenState extends State<ChatScreen> {
     _buildMessageItems();
   }
 
+  bool _turnStillStreaming() {
+    final session = _wsService?.activeSession;
+    if (session == null) return false;
+    return session.messages.any(
+      (message) => !message.isUser && message.isStreaming,
+    );
+  }
+
   void _requestMessageSync({bool scroll = false}) {
     if (scroll) _pendingScroll = true;
     if (_syncScheduled) return;
@@ -746,6 +754,20 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!mounted) return;
       if (msg.isStreaming) {
         if (!_isGenerating) setState(() => _isGenerating = true);
+        return;
+      }
+      if (_turnStillStreaming()) {
+        _requestMessageSync();
+        return;
+      }
+      // Prompt responses do not always include stopReason. Once every
+      // assistant bubble has settled, leave the "正在回复" state.
+      if (_isGenerating || _isTyping) {
+        setState(() {
+          _isGenerating = false;
+          _isTyping = false;
+          _syncMessagesFromSession();
+        });
         return;
       }
       _requestMessageSync();
