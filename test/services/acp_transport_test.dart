@@ -97,7 +97,7 @@ void main() {
           command: 'agent',
           args: const ['acp'],
         ),
-        r'cmd /c "cd /d C:\Dev\PocketBot && agent acp"',
+        r'cmd /d /s /c "cd /d C:\Dev\PocketBot && call agent acp"',
       );
     });
   });
@@ -134,7 +134,37 @@ void main() {
           command: 'agent',
           args: const ['acp'],
         ),
-        r'cmd /c "cd /d D:\work && agent acp"',
+        r'cmd /d /s /c "cd /d D:\work && call agent acp"',
+      );
+    });
+  });
+
+  group('formatRemoteAgentExit', () {
+    test('explains a missing agent from stderr', () {
+      expect(
+        formatRemoteAgentExit(
+          exitCode: 1,
+          stderr:
+              "'agent' is not recognized as an internal or external command,\noperable program or batch file.",
+        ),
+        'AGENT_EXIT:远程电脑找不到 agent。请安装 Cursor Agent，并确认 SSH 登录后能运行 agent acp。',
+      );
+    });
+
+    test('keeps the last stderr line when the cause is specific', () {
+      expect(
+        formatRemoteAgentExit(
+          exitCode: 1,
+          stderr: 'banner\nError: not logged in',
+        ),
+        'AGENT_EXIT:Error: not logged in',
+      );
+    });
+
+    test('says the process exited when stderr is empty', () {
+      expect(
+        formatRemoteAgentExit(exitCode: 1),
+        contains('退出码 1'),
       );
     });
   });

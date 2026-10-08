@@ -215,6 +215,55 @@ bool isRemoteRoot(String path) {
       RegExp(r'^/[a-zA-Z]:/?$').hasMatch(trimmed.replaceAll('\\', '/'));
 }
 
+/// Turns a remote agent exit into a short message the connection screen can show.
+String formatRemoteAgentExit({int? exitCode, String stderr = ''}) {
+  final line = _usefulRemoteStderr(stderr);
+  final lower = line.toLowerCase();
+  if (lower.contains('not recognized') ||
+      lower.contains('cannot find') && lower.contains('agent') ||
+      lower.contains('no such file')) {
+    return 'AGENT_EXIT:远程电脑找不到 agent。请安装 Cursor Agent，并确认 SSH 登录后能运行 agent acp。';
+  }
+  if (lower.contains('cannot find the path') ||
+      lower.contains('system cannot find the path') ||
+      lower.contains('找不到指定的路径') ||
+      lower.contains('不是内部或外部命令') && lower.contains('cd')) {
+    return 'AGENT_EXIT:远程工作目录不存在，或当前账号无法进入该目录。';
+  }
+  if (lower.contains('不是内部或外部命令') ||
+      lower.contains('is not recognized')) {
+    return 'AGENT_EXIT:远程电脑找不到 agent。请安装 Cursor Agent，并确认 SSH 登录后能运行 agent acp。';
+  }
+  if (line.isNotEmpty) {
+    final clipped = line.length > 180 ? '${line.substring(0, 180)}…' : line;
+    return 'AGENT_EXIT:$clipped';
+  }
+  final code = exitCode == null ? '' : '（退出码 $exitCode）';
+  return 'AGENT_EXIT:远程 Agent 已退出$code。请在那台电脑上进入同一目录运行 agent acp，并确认已经 agent login。';
+}
+
+String _usefulRemoteStderr(String stderr) {
+  final lines = stderr
+      .replaceAll('\r\n', '\n')
+      .split('\n')
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty)
+      .toList();
+  if (lines.isEmpty) return '';
+  for (final line in lines.reversed) {
+    final lower = line.toLowerCase();
+    if (lower.contains('not recognized') ||
+        lower.contains('不是内部或外部命令') ||
+        lower.contains('cannot find the path') ||
+        lower.contains('找不到指定的路径') ||
+        lower.contains('no such file') ||
+        lower.contains('error')) {
+      return line;
+    }
+  }
+  return lines.last;
+}
+
 String shQuote(String value) {
   if (value.isEmpty) return "''";
   return "'${value.replaceAll("'", "'\"'\"'")}'";
@@ -232,7 +281,9 @@ String buildRemoteAgentCommand({
   if (looksLikeWindowsPath(cwd)) {
     final joined = [command, ...args].join(' ');
     final escaped = cwd.replaceAll('"', '');
-    return 'cmd /c "cd /d $escaped && $joined"';
+    // /d skips cmd AutoRun, /s makes the quotes predictable, and call waits
+    // for agent.cmd instead of letting that batch file end the SSH session.
+    return 'cmd /d /s /c "cd /d $escaped && call $joined"';
   }
   final quotedArgs = [command, ...args].map(shQuote).join(' ');
   return 'cd ${shQuote(cwd)} && $quotedArgs';
@@ -538,7 +589,9 @@ class SshStdioTransport implements AcpTransport {
   final SSHSession _session;
   final StreamController<dynamic> _incoming;
   final NdjsonBuffer _buffer = NdjsonBuffer();
+  final StringBuffer _stderr = StringBuffer();
   bool _closed = false;
+  bool _reportedExit = false;
 
   static Future<SshStdioTransport> start(GatewayInfo target) async {
     final client = await openSshClient(target);
@@ -575,20 +628,32 @@ class SshStdioTransport implements AcpTransport {
         transport._onStdout,
         onError: incoming.addError,
         onDone: () {
-          if (!incoming.isClosed) incoming.close();
+          // The exec channel reports the real exit just after stdout ends.
+          // Closing here would hide stderr behind "ACP connection closed".
         },
       );
       session.stderr.cast<List<int>>().transform(utf8.decoder).listen((chunk) {
         final text = chunk.trim();
-        if (text.isNotEmpty) Logger.warning('[ACP ssh] $text');
-      });
-      session.done.then((_) {
-        if (transport._closed) return;
-        Logger.warning('[ACP] Remote agent session closed');
-        if (!incoming.isClosed) {
-          incoming.addError(Exception('SSH agent session closed'));
-          incoming.close();
+        if (text.isEmpty) return;
+        Logger.warning('[ACP ssh] $text');
+        if (transport._stderr.length < 4000) {
+          if (transport._stderr.isNotEmpty) transport._stderr.write('\n');
+          transport._stderr.write(text);
         }
+      });
+      session.done.then((_) async {
+        if (transport._closed || transport._reportedExit) return;
+        transport._reportedExit = true;
+        // stderr can still be flushing when the channel closes.
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        if (transport._closed || incoming.isClosed) return;
+        final message = formatRemoteAgentExit(
+          exitCode: session.exitCode,
+          stderr: transport._stderr.toString(),
+        );
+        Logger.warning('[ACP] $message');
+        incoming.addError(Exception(message));
+        await incoming.close();
       });
       return transport;
     } catch (error) {

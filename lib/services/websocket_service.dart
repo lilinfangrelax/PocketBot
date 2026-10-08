@@ -336,7 +336,10 @@ class WebSocketService with ChangeNotifier {
       Logger.error('[ACP] Connection failed: $error');
       await _closeTransport();
       final value = error.toString();
-      if (value.startsWith('AUTH_FAILED:') ||
+      final agentExit = value.indexOf('AGENT_EXIT:');
+      if (agentExit >= 0) {
+        _setError(value.substring(agentExit));
+      } else if (value.startsWith('AUTH_FAILED:') ||
           value.startsWith('CONNECTION_') ||
           value.startsWith('CURSOR_AGENT_') ||
           value.startsWith('AGENT_SPAWN_')) {
@@ -1558,6 +1561,12 @@ class WebSocketService with ChangeNotifier {
   void _handleSocketError(Object error) {
     Logger.error('[ACP] Transport error: $error');
     _failPending(error);
+    final value = error.toString();
+    final agentExit = value.indexOf('AGENT_EXIT:');
+    if (agentExit >= 0) {
+      _setError(value.substring(agentExit));
+      return;
+    }
     _setError('CONNECTION_ERROR:ACP 连接失败');
   }
 

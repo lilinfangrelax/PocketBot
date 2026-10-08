@@ -316,6 +316,8 @@ class _HomeScreenState extends State<HomeScreen> {
           return '找不到 Cursor Agent。请安装 Cursor 并确保 `agent` 在 PATH 中，然后运行 agent login。';
         case 'AGENT_SPAWN_FAILED':
           return errorMessage.isEmpty ? '无法启动本机 Agent' : errorMessage;
+        case 'AGENT_EXIT':
+          return errorMessage.isEmpty ? '远程 Agent 已退出' : errorMessage;
         case 'CONNECTION_FAILED':
           return errorMessage.isEmpty ? '连接失败' : errorMessage;
         default:
