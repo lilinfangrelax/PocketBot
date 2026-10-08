@@ -4,8 +4,9 @@ PocketBot is a Flutter client for agents that implement the [Agent Client Protoc
 
 ## Features
 
-- Local Cursor Agent over ACP stdio (`agent acp`)
-- Remote ACP over SSH: log in, pick a working directory, then start the same agent
+- ACP Registry: Cursor, Claude, Gemini, Codex, and the other published agents
+- Local agent over ACP stdio
+- Remote ACP over SSH: log in, install `pocketbot-remote` into `~/.pocketbot`, then start the selected agent. The helper keeps the agent process alive if the SSH connection drops.
 - Optional ACP WebSocket transport
 - Multiple sessions with local history
 - Streaming replies, tool calls, plans, and slash commands
@@ -14,8 +15,8 @@ PocketBot is a Flutter client for agents that implement the [Agent Client Protoc
 ## Requirements
 
 - Flutter 3.10 or newer
-- For local use: Cursor CLI (`agent`) installed and logged in
-- For remote use: SSH access to a host that already has `agent acp`
+- For local use: the selected agent installed, or a machine that can download it
+- For remote use: SSH access. PocketBot installs a version-matched `pocketbot-remote` binary from GitHub Releases. `npx` agents also need Node.js on that host; `uvx` agents need `uv`. Cursor can fall back to an existing `agent` command if the registry archive cannot be downloaded.
 
 ## Run
 

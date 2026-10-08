@@ -69,9 +69,11 @@ class GatewayCard extends StatelessWidget {
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
-                            gateway.kind == AgentTransportKind.local
-                                ? '本机'
-                                : 'SSH',
+                            gateway.agentLabel.isNotEmpty
+                                ? gateway.agentLabel
+                                : gateway.kind == AgentTransportKind.local
+                                    ? '本机'
+                                    : 'SSH',
                             style: TextStyle(
                               fontSize: 12,
                               color: Theme.of(context).primaryColor,

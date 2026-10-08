@@ -36,7 +36,9 @@ jobs:
         run: flutter pub get
 
       - name: Run unit tests
-        run: flutter test --coverage
+        run: |
+          flutter test --coverage
+          cd packages/pocketbot_remote && dart test
 
       - name: Upload coverage to Codecov
         continue-on-error: true

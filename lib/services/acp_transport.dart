@@ -5,8 +5,11 @@ import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:pocketbot_remote/pocketbot_remote.dart';
+
 import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
+import 'package:pocket_bot/services/remote_helper.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -18,6 +21,15 @@ abstract class AcpTransport {
   void send(String jsonFrame);
 
   Future<void> close();
+
+  /// True when a remote helper reattached to an agent that is already running.
+  Future<bool> get resumed async => false;
+
+  /// Set when the helper reports that the agent could not be started.
+  String? get startupError => null;
+
+  /// Release stdout that was held until [resumed] was known.
+  void release() {}
 }
 
 /// Splits stdio ACP traffic into one JSON object per line.
@@ -264,6 +276,21 @@ String _usefulRemoteStderr(String stderr) {
   return lines.last;
 }
 
+String _publicRemoteError(Object error) {
+  final text = error.toString().replaceFirst('Exception: ', '');
+  const codes = [
+    'HELPER_INSTALL_FAILED:',
+    'REGISTRY_UNAVAILABLE:',
+    'AGENT_NOT_IN_REGISTRY:',
+    'AGENT_UNSUPPORTED_PLATFORM:',
+  ];
+  for (final code in codes) {
+    final index = text.indexOf(code);
+    if (index >= 0) return text.substring(index);
+  }
+  return 'CONNECTION_FAILED:无法在远程主机启动 Agent: $text';
+}
+
 String shQuote(String value) {
   if (value.isEmpty) return "''";
   return "'${value.replaceAll("'", "'\"'\"'")}'";
@@ -377,9 +404,9 @@ class LocalStdioTransport implements AcpTransport {
       throw Exception('AGENT_SPAWN_FAILED:工作目录不存在: $cwd');
     }
 
-    final resolved = await CursorAgent.resolve(target.command);
+    final launch = await _localLaunch(target);
     Logger.info(
-      '[ACP] Spawning ${resolved.executable} ${[...resolved.prefixArgs, ...target.args].join(' ')} in $cwd',
+      '[ACP] Spawning ${launch.executable} ${launch.args.join(' ')} in $cwd',
     );
 
     final receivePort = ReceivePort();
@@ -425,12 +452,13 @@ class LocalStdioTransport implements AcpTransport {
         acpStdioIsolateMain,
         <String, dynamic>{
           'replyPort': receivePort.sendPort,
-          'executable': resolved.executable,
-          'args': <String>[...resolved.prefixArgs, ...target.args],
+          'executable': launch.executable,
+          'args': launch.args,
           'workingDirectory': cwd,
-          'runInShell': resolved.runInShell,
+          'runInShell': launch.runInShell,
           'environment': <String, String>{
             ...Platform.environment,
+            ...target.launchEnv,
             'NO_COLOR': '1',
           },
         },
@@ -449,7 +477,7 @@ class LocalStdioTransport implements AcpTransport {
     } catch (error) {
       receivePort.close();
       isolate?.kill(priority: Isolate.immediate);
-      throw Exception('AGENT_SPAWN_FAILED:无法启动 Cursor Agent: $error');
+      throw Exception('AGENT_SPAWN_FAILED:无法启动 Agent: $error');
     }
   }
 
@@ -480,6 +508,63 @@ class LocalStdioTransport implements AcpTransport {
     _receivePort.close();
     if (!_incoming.isClosed) await _incoming.close();
   }
+}
+
+class _LocalLaunch {
+  final String executable;
+  final List<String> args;
+  final bool runInShell;
+
+  const _LocalLaunch({
+    required this.executable,
+    required this.args,
+    required this.runInShell,
+  });
+}
+
+Future<_LocalLaunch> _localLaunch(GatewayInfo target) async {
+  if (target.archiveUrl != null && target.archiveUrl!.isNotEmpty) {
+    try {
+      final cached = await ensureCachedAgent(
+        root: Directory(pocketbotHome()),
+        agentId: target.agentId.isEmpty ? 'agent' : target.agentId,
+        version: target.agentVersion.isEmpty ? '0' : target.agentVersion,
+        archiveUrl: target.archiveUrl!,
+        sha256: target.archiveSha256,
+        command: target.command,
+        args: target.args,
+        download: downloadReleaseAsset,
+      );
+      return _launchFromArgv(cached.argv);
+    } catch (error) {
+      if (target.legacyArgv.isEmpty) {
+        throw Exception('无法下载代理: $error');
+      }
+      Logger.warning('[ACP] archive download failed, using installed agent: $error');
+      final resolved = await CursorAgent.resolve(target.legacyArgv.first);
+      return _LocalLaunch(
+        executable: resolved.executable,
+        args: [...resolved.prefixArgs, ...target.legacyArgv.skip(1)],
+        runInShell: resolved.runInShell,
+      );
+    }
+  }
+  final resolved = await CursorAgent.resolve(target.command);
+  return _LocalLaunch(
+    executable: resolved.executable,
+    args: [...resolved.prefixArgs, ...target.args],
+    runInShell: resolved.runInShell,
+  );
+}
+
+_LocalLaunch _launchFromArgv(List<String> argv) {
+  final executable = argv.first;
+  final lower = executable.toLowerCase();
+  return _LocalLaunch(
+    executable: executable,
+    args: argv.sublist(1),
+    runInShell: lower.endsWith('.cmd') || lower.endsWith('.bat'),
+  );
 }
 
 /// Owns the ACP child process, UTF-8 decode, NDJSON split, and jsonDecode
@@ -590,6 +675,10 @@ class SshStdioTransport implements AcpTransport {
   final StreamController<dynamic> _incoming;
   final NdjsonBuffer _buffer = NdjsonBuffer();
   final StringBuffer _stderr = StringBuffer();
+  final List<String> _held = [];
+  final Completer<bool> _resumed = Completer<bool>();
+  String? _startupError;
+  bool _released = false;
   bool _closed = false;
   bool _reportedExit = false;
 
@@ -607,13 +696,9 @@ class SshStdioTransport implements AcpTransport {
     required SSHClient client,
     required GatewayInfo target,
   }) async {
-    final cwd = target.workingDirectory.trim().isEmpty
-        ? '.'
-        : target.workingDirectory;
-    final remoteCommand = buildRemoteAgentCommand(
-      workingDirectory: cwd,
-      command: target.command,
-      args: target.args,
+    final remoteCommand = await remoteHelperCommand(
+      client: client,
+      target: target,
     );
     Logger.info(
       '[ACP] SSH ${target.username}@${target.host}:${target.port} → $remoteCommand',
@@ -636,12 +721,15 @@ class SshStdioTransport implements AcpTransport {
         final text = chunk.trim();
         if (text.isEmpty) return;
         Logger.warning('[ACP ssh] $text');
+        transport._noteHelperStderr(text);
+        if (text.startsWith('POCKETBOT ')) return;
         if (transport._stderr.length < 4000) {
           if (transport._stderr.isNotEmpty) transport._stderr.write('\n');
           transport._stderr.write(text);
         }
       });
       session.done.then((_) async {
+        transport._finishResume(false);
         if (transport._closed || transport._reportedExit) return;
         transport._reportedExit = true;
         // stderr can still be flushing when the channel closes.
@@ -657,12 +745,53 @@ class SshStdioTransport implements AcpTransport {
       });
       return transport;
     } catch (error) {
-      throw Exception('CONNECTION_FAILED:无法在远程主机启动 Agent: $error');
+      throw Exception(_publicRemoteError(error));
     }
   }
 
+  @override
+  Future<bool> get resumed => _resumed.future;
+
+  @override
+  String? get startupError => _startupError;
+
+  @override
+  void release() {
+    if (_released) return;
+    _released = true;
+    for (final line in _held) {
+      if (!_incoming.isClosed) _incoming.add(line);
+    }
+    _held.clear();
+  }
+
+  void _noteHelperStderr(String text) {
+    if (_resumed.isCompleted) return;
+    for (final raw in text.split('\n')) {
+      final line = raw.trim();
+      if (line.startsWith('POCKETBOT resumed=')) {
+        _resumed.complete(line.endsWith('true'));
+        return;
+      }
+      if (line.startsWith('POCKETBOT error=')) {
+        _startupError = line.substring('POCKETBOT error='.length).trim();
+        _resumed.complete(false);
+        return;
+      }
+    }
+  }
+
+  void _finishResume(bool value) {
+    if (!_resumed.isCompleted) _resumed.complete(value);
+  }
+
   void _onStdout(String chunk) {
-    for (final line in _buffer.add(chunk)) {
+    final lines = _buffer.add(chunk);
+    if (!_released) {
+      _held.addAll(lines);
+      return;
+    }
+    for (final line in lines) {
       if (!_incoming.isClosed) _incoming.add(line);
     }
   }

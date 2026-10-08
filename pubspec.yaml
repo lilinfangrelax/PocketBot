@@ -3,7 +3,7 @@ description: A modern mobile client for Agent Client Protocol (ACP) agents, buil
 
 publish_to: 'none'
 
-version: 1.2.4-beta
+version: 1.2.5-beta
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -28,6 +28,8 @@ dependencies:
   web_socket_channel: ^2.4.0
   http: ^1.1.0
   dartssh2: ^3.3.1
+  pocketbot_remote:
+    path: packages/pocketbot_remote
 
   # Security
   flutter_secure_storage: ^9.0.0

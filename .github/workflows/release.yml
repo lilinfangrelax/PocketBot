@@ -68,7 +68,9 @@ jobs:
         run: flutter pub get
 
       - name: Run unit tests
-        run: flutter test
+        run: |
+          flutter test
+          cd packages/pocketbot_remote && dart test
 
   analyze:
     name: Analyze
@@ -176,10 +178,52 @@ jobs:
           path: PocketBot-Windows-${{ needs.prepare.outputs.version }}.zip
           if-no-files-found: error
 
+  build-remote:
+    name: Remote helper (${{ matrix.asset }})
+    runs-on: ${{ matrix.os }}
+    needs: [prepare, test, analyze]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: pocketbot-remote-linux-x64
+          - os: ubuntu-24.04-arm
+            asset: pocketbot-remote-linux-arm64
+          - os: macos-latest
+            asset: pocketbot-remote-darwin-arm64
+          - os: windows-2022
+            asset: pocketbot-remote-windows-x64.exe
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
+
+      - name: Compile pocketbot-remote
+        shell: bash
+        working-directory: packages/pocketbot_remote
+        run: |
+          dart pub get
+          dart compile exe bin/pocketbot_remote.dart \
+            -DPOCKETBOT_VERSION="${{ needs.prepare.outputs.version }}" \
+            -o "../../${{ matrix.asset }}"
+
+      - name: Upload remote helper
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+
   publish:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
-    needs: [prepare, build-android, build-windows]
+    needs: [prepare, build-android, build-windows, build-remote]
     permissions:
       contents: write
     steps:

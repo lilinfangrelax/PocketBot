@@ -3,10 +3,13 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pocket_bot/models/message.dart';
+import 'package:pocket_bot/screens/acp_registry_screen.dart';
 import 'package:pocket_bot/screens/chat_screen.dart';
 import 'package:pocket_bot/screens/remote_directory_picker.dart';
 import 'package:pocket_bot/screens/settings_screen.dart';
+import 'package:pocket_bot/services/acp_registry.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
 import 'package:pocket_bot/services/ssh_remote_session.dart';
@@ -14,7 +17,7 @@ import 'package:pocket_bot/services/websocket_service.dart' as ws;
 
 typedef ConnectionState = ws.ConnectionState;
 
-/// 首页 - 本地 / SSH 启动 Cursor Agent
+/// 首页 - 从 ACP Registry 选择代理，本机或 SSH 启动。
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -40,6 +43,8 @@ class _HomeScreenState extends State<HomeScreen> {
   String _manualPrivateKey = '';
   String _manualName = '';
   String _sshWorkingDirectory = '.';
+  String _agentId = 'cursor';
+  String _agentLabel = 'Cursor';
 
   bool get _canLaunchLocal =>
       !kIsWeb &&
@@ -54,6 +59,53 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       context.read<ConnectionManager>().checkGatewaysStatus();
     });
+    _loadSelectedAgent();
+  }
+
+  Future<void> _loadSelectedAgent() async {
+    final prefs = await SharedPreferences.getInstance();
+    final id = prefs.getString('acp_agent_id') ?? 'cursor';
+    final label = prefs.getString('acp_agent_label') ?? 'Cursor';
+    if (!mounted) return;
+    setState(() {
+      _agentId = id;
+      _agentLabel = label;
+    });
+  }
+
+  Future<void> _pickAgent() async {
+    final picked = await Navigator.push<AcpRegistryAgent>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AcpRegistryScreen(selectedId: _agentId),
+      ),
+    );
+    if (picked == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('acp_agent_id', picked.id);
+    await prefs.setString('acp_agent_label', picked.name);
+    if (!mounted) return;
+    setState(() {
+      _agentId = picked.id;
+      _agentLabel = picked.name;
+    });
+  }
+
+  GatewayInfo _withSelectedAgent(GatewayInfo gateway) {
+    if (gateway.agentId.isNotEmpty) return gateway;
+    return gateway.copyWith(agentId: _agentId, agentLabel: _agentLabel);
+  }
+
+  Widget _buildAgentPicker() {
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.smart_toy_outlined),
+        title: Text(_agentLabel),
+        subtitle: const Text('ACP Registry，点按更换代理'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: _pickAgent,
+      ),
+    );
   }
 
   @override
@@ -202,6 +254,8 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         const SizedBox(height: 16),
+        _buildAgentPicker(),
+        const SizedBox(height: 16),
         _buildLaunchLocal(manager),
         const SizedBox(height: 16),
         _buildGatewayList(manager),
@@ -219,9 +273,11 @@ class _HomeScreenState extends State<HomeScreen> {
           icon: Icons.computer,
           color: Colors.grey,
           text: '未连接',
-          subText: '本机或 SSH 启动 Cursor Agent（agent acp）',
+          subText: '从 ACP Registry 选择代理，本机或 SSH 启动',
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
+        _buildAgentPicker(),
+        const SizedBox(height: 16),
         _buildLaunchLocal(manager),
         const SizedBox(height: 24),
         _buildGatewayList(manager),
@@ -251,12 +307,12 @@ class _HomeScreenState extends State<HomeScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '本机 Cursor Agent',
+              '本机 $_agentLabel',
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
             Text(
-              '在这台电脑上启动 `agent acp`，通过 stdio 会话。请先运行 agent login。',
+              '在这台电脑上启动所选 ACP 代理。Cursor 需要先运行 agent login。',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Colors.grey[600],
                   ),
@@ -276,11 +332,14 @@ class _HomeScreenState extends State<HomeScreen> {
               child: ElevatedButton.icon(
                 onPressed: manager.state == ConnectionState.connecting
                     ? null
-                    : () => manager.connectLocal(
+                    : () => manager.connectTo(GatewayInfo.local(
+                          name: _agentLabel,
                           workingDirectory: _workingDirectoryController.text,
-                        ),
+                          agentId: _agentId,
+                          agentLabel: _agentLabel,
+                        )),
                 icon: const Icon(Icons.play_arrow),
-                label: const Text('启动本机 Agent'),
+                label: Text('启动 $_agentLabel'),
               ),
             ),
           ],
@@ -318,6 +377,14 @@ class _HomeScreenState extends State<HomeScreen> {
           return errorMessage.isEmpty ? '无法启动本机 Agent' : errorMessage;
         case 'AGENT_EXIT':
           return errorMessage.isEmpty ? '远程 Agent 已退出' : errorMessage;
+        case 'HELPER_INSTALL_FAILED':
+          return errorMessage.isEmpty ? '远程服务安装失败' : errorMessage;
+        case 'REGISTRY_UNAVAILABLE':
+          return errorMessage.isEmpty ? '无法获取 ACP Registry' : errorMessage;
+        case 'AGENT_NOT_IN_REGISTRY':
+          return errorMessage.isEmpty ? 'Registry 里没有这个代理' : errorMessage;
+        case 'AGENT_UNSUPPORTED_PLATFORM':
+          return errorMessage.isEmpty ? '这个代理不支持当前系统' : errorMessage;
         case 'CONNECTION_FAILED':
           return errorMessage.isEmpty ? '连接失败' : errorMessage;
         default:
@@ -452,7 +519,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              '登录远程主机后选择工作目录，再启动 `agent acp`。协议仍是 stdio JSON-RPC。',
+              '登录后会把 pocketbot-remote 装到远程的 ~/.pocketbot，再启动 $_agentLabel。断线后代理进程还在，重连会接回去。',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Colors.grey[600],
                   ),
@@ -555,7 +622,7 @@ class _HomeScreenState extends State<HomeScreen> {
     ConnectionManager manager, {
     GatewayInfo? existing,
   }) async {
-    final target = existing ?? _buildSshTarget();
+    final target = _withSelectedAgent(existing ?? _buildSshTarget());
     if (target.requiresAuth) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('请填写 SSH 密码或私钥')),
@@ -625,13 +692,13 @@ class _HomeScreenState extends State<HomeScreen> {
       name: _manualName.isNotEmpty ? _manualName : 'SSH 远程',
       workingDirectory:
           _sshWorkingDirectory.isEmpty ? '.' : _sshWorkingDirectory,
-    );
+    ).copyWith(agentId: _agentId, agentLabel: _agentLabel);
   }
 
   void _showConnectionDialog(BuildContext context, GatewayInfo gateway) {
     if (gateway.kind == AgentTransportKind.local) {
       _workingDirectoryController.text = gateway.workingDirectory;
-      context.read<ConnectionManager>().connectTo(gateway);
+      context.read<ConnectionManager>().connectTo(_withSelectedAgent(gateway));
       return;
     }
     _hostController.text = gateway.host;

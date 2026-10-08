@@ -252,8 +252,8 @@ class WebSocketService with ChangeNotifier {
     );
   }
 
-  Future<void> connectTarget(GatewayInfo target) async {
-    _pendingGateway = target;
+  Future<void> connectTarget(GatewayInfo target, {bool resume = false}) async {
+    _pendingGateway = target.copyWith(resumeAgent: false);
     final cwd = target.kind == AgentTransportKind.local
         ? CursorAgent.resolveWorkingDirectory(target.workingDirectory)
         : (target.workingDirectory.trim().isEmpty
@@ -262,6 +262,7 @@ class WebSocketService with ChangeNotifier {
     await _attachTransport(
       await AcpTransportFactory.open(target),
       workingDirectory: cwd,
+      resume: resume,
     );
   }
 
@@ -275,6 +276,7 @@ class WebSocketService with ChangeNotifier {
   Future<void> _attachTransport(
     AcpTransport transport, {
     required String workingDirectory,
+    bool resume = false,
   }) async {
     if (isConnected || _state == ConnectionState.connecting) {
       await disconnect();
@@ -296,6 +298,20 @@ class WebSocketService with ChangeNotifier {
         onDone: _handleSocketDone,
       );
 
+      final didResume = await transport.resumed;
+      transport.release();
+      final startupError = transport.startupError;
+      if (startupError != null && startupError.isNotEmpty) {
+        throw Exception(startupError);
+      }
+      if (resume && didResume) {
+        _state = ConnectionState.connected;
+        _errorMessage = null;
+        notifyListeners();
+        return;
+      }
+      if (resume) clearAllSessions();
+
       final response = await _request(
         'initialize',
         {
@@ -316,7 +332,7 @@ class WebSocketService with ChangeNotifier {
             'version': '1.1.0',
           },
         },
-        timeout: const Duration(seconds: 60),
+        timeout: const Duration(minutes: 3),
       );
       final version = response['protocolVersion'];
       if (version != 1) {
@@ -1653,7 +1669,11 @@ class WebSocketService with ChangeNotifier {
     final gateway = _pendingGateway;
     if (gateway == null) return;
     try {
-      await connectTarget(gateway);
+      final resume = gateway.kind == AgentTransportKind.ssh;
+      await connectTarget(
+        resume ? gateway.copyWith(resumeAgent: true) : gateway,
+        resume: resume,
+      );
     } catch (_) {
       _startAutoReconnect();
     }

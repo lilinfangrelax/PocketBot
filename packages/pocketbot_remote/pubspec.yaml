@@ -1,0 +1,14 @@
+name: pocketbot_remote
+description: Headless helper that keeps an ACP agent alive on an SSH host.
+publish_to: 'none'
+version: 0.0.1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  archive: ^3.6.1
+  crypto: ^3.0.6
+
+dev_dependencies:
+  test: ^1.25.0

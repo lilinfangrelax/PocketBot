@@ -5,7 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'package:pocket_bot/config/gateway_config.dart';
 import 'package:pocket_bot/config/session_storage.dart';
 import 'package:pocket_bot/models/message.dart';
+import 'package:pocket_bot/services/acp_registry.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
+import 'package:pocket_bot/services/remote_helper.dart';
 import 'package:pocket_bot/services/ssh_remote_session.dart';
 import 'package:pocket_bot/services/websocket_service.dart' as ws;
 import 'package:pocket_bot/utils/logger.dart';
@@ -177,7 +179,23 @@ class ConnectionManager extends ChangeNotifier {
   }
 
   Future<void> connectTo(GatewayInfo gateway) async {
-    await _completeConnect(gateway, () => _wsService.connectTarget(gateway));
+    var prepared = gateway;
+    if (gateway.kind == AgentTransportKind.local && gateway.agentId.isNotEmpty) {
+      try {
+        prepared = await prepareGatewayLaunch(gateway, localRemotePlatform());
+      } catch (error) {
+        _state = ws.ConnectionState.error;
+        _gateway = gateway;
+        _errorMessage = error.toString().replaceFirst('Exception: ', '');
+        notifyListeners();
+        return;
+      }
+    }
+    await _completeConnect(
+      prepared,
+      () => _wsService.connectTarget(prepared),
+      persist: gateway,
+    );
   }
 
   Future<void> connectWithSshSession(
@@ -195,8 +213,9 @@ class ConnectionManager extends ChangeNotifier {
 
   Future<void> _completeConnect(
     GatewayInfo gateway,
-    Future<void> Function() connect,
-  ) async {
+    Future<void> Function() connect, {
+    GatewayInfo? persist,
+  }) async {
     _state = ws.ConnectionState.connecting;
     _gateway = gateway;
     _errorMessage = null;
@@ -208,6 +227,7 @@ class ConnectionManager extends ChangeNotifier {
 
       if (_wsService.state == ws.ConnectionState.connected) {
         _state = ws.ConnectionState.connected;
+        _gateway = persist ?? gateway;
         await _saveGateway();
         Logger.info('Connected to ${gateway.name}');
       } else {

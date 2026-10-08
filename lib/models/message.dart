@@ -130,6 +130,16 @@ class GatewayInfo {
   final String privateKey;
   final String command;
   final List<String> args;
+  final String agentId;
+  final String agentLabel;
+
+  /// Resolved for this connection only. Not stored.
+  final String? archiveUrl;
+  final String? archiveSha256;
+  final String agentVersion;
+  final Map<String, String> launchEnv;
+  final List<String> legacyArgv;
+  final bool resumeAgent;
 
   GatewayInfo({
     this.kind = AgentTransportKind.ssh,
@@ -145,6 +155,14 @@ class GatewayInfo {
     this.privateKey = '',
     this.command = 'agent',
     this.args = const ['acp'],
+    this.agentId = '',
+    this.agentLabel = '',
+    this.archiveUrl,
+    this.archiveSha256,
+    this.agentVersion = '',
+    this.launchEnv = const {},
+    this.legacyArgv = const [],
+    this.resumeAgent = false,
   }) : port = port ?? (kind == AgentTransportKind.ssh ? 22 : 0);
 
   factory GatewayInfo.local({
@@ -152,6 +170,8 @@ class GatewayInfo {
     String workingDirectory = '',
     String command = 'agent',
     List<String> args = const ['acp'],
+    String agentId = '',
+    String agentLabel = '',
   }) {
     return GatewayInfo(
       kind: AgentTransportKind.local,
@@ -161,6 +181,8 @@ class GatewayInfo {
       workingDirectory: workingDirectory,
       command: command,
       args: args,
+      agentId: agentId,
+      agentLabel: agentLabel,
     );
   }
 
@@ -174,6 +196,8 @@ class GatewayInfo {
     String workingDirectory = '.',
     String command = 'agent',
     List<String> args = const ['acp'],
+    String agentId = '',
+    String agentLabel = '',
   }) {
     return GatewayInfo(
       kind: AgentTransportKind.ssh,
@@ -186,6 +210,8 @@ class GatewayInfo {
       workingDirectory: workingDirectory,
       command: command,
       args: args,
+      agentId: agentId,
+      agentLabel: agentLabel,
     );
   }
 
@@ -244,6 +270,8 @@ class GatewayInfo {
       args: rawArgs is List
           ? rawArgs.map((item) => item.toString()).toList()
           : const ['acp'],
+      agentId: json['agentId'] as String? ?? '',
+      agentLabel: json['agentLabel'] as String? ?? '',
     );
   }
 
@@ -277,6 +305,8 @@ class GatewayInfo {
       'privateKey': privateKey,
       'command': command,
       'args': args,
+      'agentId': agentId,
+      'agentLabel': agentLabel,
     };
   }
 
@@ -294,6 +324,14 @@ class GatewayInfo {
     String? privateKey,
     String? command,
     List<String>? args,
+    String? agentId,
+    String? agentLabel,
+    String? archiveUrl,
+    String? archiveSha256,
+    String? agentVersion,
+    Map<String, String>? launchEnv,
+    List<String>? legacyArgv,
+    bool? resumeAgent,
   }) {
     return GatewayInfo(
       kind: kind ?? this.kind,
@@ -309,6 +347,14 @@ class GatewayInfo {
       privateKey: privateKey ?? this.privateKey,
       command: command ?? this.command,
       args: args ?? this.args,
+      agentId: agentId ?? this.agentId,
+      agentLabel: agentLabel ?? this.agentLabel,
+      archiveUrl: archiveUrl ?? this.archiveUrl,
+      archiveSha256: archiveSha256 ?? this.archiveSha256,
+      agentVersion: agentVersion ?? this.agentVersion,
+      launchEnv: launchEnv ?? this.launchEnv,
+      legacyArgv: legacyArgv ?? this.legacyArgv,
+      resumeAgent: resumeAgent ?? this.resumeAgent,
     );
   }
 
