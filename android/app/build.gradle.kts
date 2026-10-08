@@ -50,6 +50,10 @@ android {
                 keyPassword = keystoreProperties.getProperty("keyPassword")
                 storePassword = keystoreProperties.getProperty("storePassword")
                 storeFile = rootProject.file("../signing/pocketbot-release.jks")
+                // ColorOS reports a v2-only APK as “安装包已损坏”.
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }

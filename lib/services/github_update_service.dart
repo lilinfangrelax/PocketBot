@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
@@ -68,16 +69,18 @@ class GithubUpdateService {
     final name = asset.name.split(RegExp(r'[/\\]')).last;
     if (name.isEmpty || asset.downloadUrl.isEmpty) return null;
 
-    final directory = await getTemporaryDirectory();
+    final directory = await _updateDirectory();
     final finished = File('${directory.path}/$name');
     final partial = File('${directory.path}/$name.partial');
 
     if (asset.size > 0 &&
         await finished.exists() &&
-        await finished.length() == asset.size) {
+        await finished.length() == asset.size &&
+        await _hasZipHeader(finished)) {
       onProgress?.call(1);
       return finished;
     }
+    if (await finished.exists()) await finished.delete();
 
     Object? lastError;
     for (var attempt = 0; attempt < 6; attempt++) {
@@ -147,6 +150,14 @@ class GithubUpdateService {
       if (await partial.exists()) await partial.delete();
       throw StateError('Range not satisfiable');
     }
+    if (response.statusCode == 206 &&
+        !contentRangeStartsAt(
+          response.headers.value('content-range'),
+          plan.offset,
+        )) {
+      if (await partial.exists()) await partial.delete();
+      throw StateError('Unexpected content range');
+    }
 
     final append = plan.offset > 0 && responseAppendsFromOffset(response.statusCode);
     final body = response.data;
@@ -172,7 +183,9 @@ class GithubUpdateService {
     }
 
     final size = await partial.length();
-    if (asset.size > 0 && size < asset.size) {
+    if (!downloadSizeMatches(written: size, assetSize: asset.size) ||
+        !await _hasZipHeader(partial)) {
+      await partial.delete();
       throw StateError('Incomplete download $size/${asset.size}');
     }
     if (await finished.exists()) await finished.delete();
@@ -188,6 +201,17 @@ class GithubUpdateService {
         if (status.isDenied || status.isPermanentlyDenied) {
           Logger.warning('[Update] Install permission denied');
           return false;
+        }
+        if (!await _hasZipHeader(file)) {
+          Logger.warning('[Update] Refusing to install a file that is not an APK');
+          return false;
+        }
+        try {
+          final installed = await const MethodChannel('pocketbot/apk_install')
+              .invokeMethod<bool>('install', {'path': file.path});
+          if (installed == true) return true;
+        } catch (error) {
+          Logger.warning('[Update] PackageInstaller failed: $error');
         }
         final result = await OpenFilex.open(
           file.path,
@@ -226,4 +250,25 @@ class GithubUpdateService {
   void close() {
     _client.close();
   }
+
+  Future<Directory> _updateDirectory() async {
+    if (Platform.isAndroid) {
+      final external = await getExternalStorageDirectory();
+      if (external != null) {
+        final directory = Directory('${external.path}/updates');
+        await directory.create(recursive: true);
+        return directory;
+      }
+    }
+    return getTemporaryDirectory();
+  }
+}
+
+Future<bool> _hasZipHeader(File file) async {
+  if (!await file.exists() || await file.length() < 4) return false;
+  final header = await file.openRead(0, 4).fold<List<int>>(
+        <int>[],
+        (previous, chunk) => previous..addAll(chunk),
+      );
+  return looksLikeZipHeader(header);
 }

@@ -39,4 +39,21 @@ void main() {
     expect(responseAppendsFromOffset(200), isFalse);
     expect(responseAppendsFromOffset(416), isFalse);
   });
+
+  test('content range must continue at the requested offset', () {
+    expect(contentRangeStartsAt('bytes 40-99/100', 40), isTrue);
+    expect(contentRangeStartsAt('bytes 0-99/100', 40), isFalse);
+    expect(contentRangeStartsAt(null, 40), isFalse);
+  });
+
+  test('a download is kept only when its size matches the asset', () {
+    expect(downloadSizeMatches(written: 100, assetSize: 100), isTrue);
+    expect(downloadSizeMatches(written: 40, assetSize: 100), isFalse);
+    expect(downloadSizeMatches(written: 150, assetSize: 100), isFalse);
+  });
+
+  test('an apk starts with a zip local header', () {
+    expect(looksLikeZipHeader([0x50, 0x4b, 0x03, 0x04, 0]), isTrue);
+    expect(looksLikeZipHeader([0x3c, 0x68, 0x74, 0x6d]), isFalse);
+  });
 }
