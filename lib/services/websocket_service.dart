@@ -1399,9 +1399,13 @@ class WebSocketService with ChangeNotifier {
       }
     }
     session.currentRunId = messageId;
-    final streaming = _promptInFlight;
     final index =
         session.messages.indexWhere((m) => !m.isUser && m.id == messageId);
+    // Keep streaming while chunks are still arriving. After the prompt has
+    // settled, a late chunk must not turn the bubble back into "正在回复".
+    final streaming = _promptInFlight ||
+        index < 0 ||
+        session.messages[index].isStreaming;
     if (index >= 0) {
       final old = session.messages[index];
       final updated = old.copyWith(
