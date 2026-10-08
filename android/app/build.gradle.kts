@@ -37,8 +37,8 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        // versionCode follows MAJOR.MINOR.PATCH. Each release increments the
-        // patch (1.2.1, 1.2.2, ...); do not encode a beta.N counter.
+        // versionCode follows MAJOR.MINOR.PATCH. Beta releases are
+        // 1.2.1-beta, 1.2.2-beta; do not append a beta.N counter.
         versionCode = androidVersionCode(flutter.versionName)
         versionName = flutter.versionName
     }
@@ -89,6 +89,7 @@ fun androidVersionCode(versionName: String): Int {
 
 fun androidPreReleaseCode(pre: String): Int {
     if (pre.isEmpty()) return 900
+    if (pre == "beta") return 100
     val beta = Regex("""^beta\.(\d+)$""").find(pre)
     if (beta != null) return beta.groupValues[1].toInt().coerceIn(1, 499)
     val rc = Regex("""^rc\.(\d+)$""").find(pre)

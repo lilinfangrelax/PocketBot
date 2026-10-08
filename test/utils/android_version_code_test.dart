@@ -26,18 +26,22 @@ void main() {
     );
   });
 
-  test('plain patch versions keep increasing past older beta tags', () {
+  test('patch versions with a beta suffix keep increasing', () {
     expect(
-      androidVersionCode('1.2.2'),
-      greaterThan(androidVersionCode('1.2.1')),
+      androidVersionCode('1.2.2-beta'),
+      greaterThan(androidVersionCode('1.2.1-beta')),
     );
     expect(
-      androidVersionCode('1.2.1'),
+      androidVersionCode('1.2.1-beta'),
       greaterThan(androidVersionCode('1.2.0-beta.8')),
     );
     expect(
-      androidVersionCode('1.3.0'),
-      greaterThan(androidVersionCode('1.2.2')),
+      androidVersionCode('1.2.1'),
+      greaterThan(androidVersionCode('1.2.1-beta')),
+    );
+    expect(
+      androidVersionCode('1.2.2-beta'),
+      greaterThan(androidVersionCode('1.2.1')),
     );
   });
 }

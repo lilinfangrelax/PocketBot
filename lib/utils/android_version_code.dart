@@ -1,11 +1,11 @@
 /// Android [versionCode] derived from `MAJOR.MINOR.PATCH`.
 ///
-/// Releases increment the patch: `1.2.1`, then `1.2.2`. The `+` build suffix
-/// is ignored. A `beta.N` suffix is still parsed so already published packages
-/// sort below the next plain version.
+/// Releases increment the patch: `1.2.1-beta`, then `1.2.2-beta`, then
+/// `1.2.2`. The `+` build suffix is ignored. Older `beta.N` tags are still
+/// parsed so they sort below the next `-beta` version.
 ///
 /// Layout: `major * 10000000 + minor * 100000 + patch * 1000 + pre`.
-/// Plain releases use `pre = 900`.
+/// `-beta` uses `pre = 100`. A plain release uses `pre = 900`.
 int androidVersionCode(String versionName) {
   final withoutBuild = versionName.split('+').first.trim();
   final match = RegExp(
@@ -22,6 +22,7 @@ int androidVersionCode(String versionName) {
 
 int _preReleaseCode(String pre) {
   if (pre.isEmpty) return 900;
+  if (pre == 'beta') return 100;
 
   final beta = RegExp(r'^beta\.(\d+)$').firstMatch(pre);
   if (beta != null) {
