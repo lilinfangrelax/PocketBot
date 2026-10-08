@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:pocketbot_remote/pocketbot_remote.dart';
 import 'package:test/test.dart';
 
@@ -45,6 +46,14 @@ void main() {
         workingDirectory: r'D:\Dev\app',
       ),
       'ssh_me_host_22_gemini_D_Dev_app',
+    );
+    expect(
+      remoteAgentSessionId(
+        connectionId: 'ssh|me@host:22',
+        agentId: 'gemini',
+        workingDirectory: 'x' * 200,
+      ),
+      'x' * 120,
     );
   });
 
@@ -149,6 +158,45 @@ void main() {
     expect(second.argv, first.argv);
   });
 
+  test('rejects an archive whose sha256 does not match', () async {
+    final root = await Directory.systemTemp.createTemp('pocketbot-agent');
+    addTearDown(() => root.delete(recursive: true));
+    final zip = _zip(Archive()..addFile(ArchiveFile('bin/tool', 2, utf8.encode('ok'))));
+    expect(
+      ensureCachedAgent(
+        root: root,
+        agentId: 'tool',
+        version: '1',
+        archiveUrl: 'https://example.com/tool.zip',
+        sha256: '0' * 64,
+        command: './bin/tool',
+        args: const ['acp'],
+        download: (_) async => zip,
+      ),
+      throwsA(predicate((error) => '$error'.contains('sha256 mismatch'))),
+    );
+  });
+
+  test('ignores archive entries that leave the cache directory', () async {
+    final root = await Directory.systemTemp.createTemp('pocketbot-agent');
+    addTearDown(() => root.delete(recursive: true));
+    final zip = _zip(Archive()
+      ..addFile(ArchiveFile('../outside.txt', 3, utf8.encode('bad')))
+      ..addFile(ArchiveFile('bin/tool', 2, utf8.encode('ok'))));
+    final cached = await ensureCachedAgent(
+      root: root,
+      agentId: 'tool',
+      version: '1',
+      archiveUrl: 'https://example.com/tool.zip?download=1',
+      sha256: crypto.sha256.convert(zip).toString(),
+      command: './bin/tool',
+      args: const ['acp'],
+      download: (_) async => zip,
+    );
+    expect(File(cached.argv.first).readAsStringSync(), 'ok');
+    expect(File('${root.path}/agents/tool/outside.txt').existsSync(), isFalse);
+  });
+
   test('failed archive download can fall back to an installed command', () async {
     final argv = await resolveLaunchArgv(
       argv: const ['acp'],
@@ -157,6 +205,41 @@ void main() {
       legacyArgv: const ['agent', 'acp'],
     );
     expect(argv, ['agent', 'acp']);
+    expect(
+      resolveLaunchArgv(
+        argv: const ['acp'],
+        archiveUrl: 'https://example.com/missing.tar.gz',
+        install: () async => throw Exception('offline'),
+      ),
+      throwsA(predicate((error) => '$error'.contains('无法下载代理'))),
+    );
+  });
+
+  test('daemon rejects a bad token and forwards the launch environment', () async {
+    final launches = <AgentLaunch>[];
+    final daemon = await RemoteDaemon.start(
+      version: 'test',
+      token: 'secret',
+      spawn: (launch) async {
+        launches.add(launch);
+        return _FakeAgent().handle;
+      },
+    );
+    addTearDown(daemon.close);
+
+    final rejected = await _handshake(daemon, token: 'nope');
+    expect(rejected['ok'], isFalse);
+    expect(rejected['error'], 'bad token');
+
+    final attached = await _attach(
+      daemon,
+      session: 'env',
+      argv: ['agent', 'acp'],
+      env: const {'FOO': 'bar'},
+    );
+    expect(launches.single.env['FOO'], 'bar');
+    expect(launches.single.cwd, '/work');
+    await attached.close();
   });
 
   test('daemon keeps the agent alive across attach and reattach', () async {
@@ -205,6 +288,24 @@ void main() {
   });
 }
 
+List<int> _zip(Archive archive) => ZipEncoder().encode(archive)!;
+
+Future<Map<String, dynamic>> _handshake(
+  RemoteDaemon daemon, {
+  required String token,
+}) async {
+  final socket = await Socket.connect(InternetAddress.loopbackIPv4, daemon.port);
+  socket.write('${jsonEncode({'token': token, 'op': 'attach'})}\n');
+  final line = await socket
+      .cast<List<int>>()
+      .transform(utf8.decoder)
+      .transform(const LineSplitter())
+      .first
+      .timeout(const Duration(seconds: 2));
+  await socket.close();
+  return jsonDecode(line) as Map<String, dynamic>;
+}
+
 class _FakeAgent {
   final stdout = StreamController<List<int>>();
   final stderr = StreamController<List<int>>.broadcast();
@@ -240,6 +341,7 @@ Future<_Attached> _attach(
   required String session,
   required List<String> argv,
   bool fresh = false,
+  Map<String, String> env = const {},
 }) async {
   final socket = await Socket.connect(InternetAddress.loopbackIPv4, daemon.port);
   socket.write('${jsonEncode({
@@ -248,6 +350,7 @@ Future<_Attached> _attach(
         'session': session,
         'cwd': '/work',
         'argv': argv,
+        'env': env,
         'fresh': fresh,
       })}\n');
   final lineDone = Completer<String>();

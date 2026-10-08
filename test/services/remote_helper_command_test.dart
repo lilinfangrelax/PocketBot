@@ -53,4 +53,48 @@ void main() {
     expect(uploaded['/home/me/.pocketbot/pocketbot-remote-1.2.5-beta'], 4);
     expect(commands.any((command) => command.contains('curl')), isTrue);
   });
+
+  test('keeps an already installed helper and uploads the windows build', () async {
+    var downloads = 0;
+    final ready = await ensureRemoteHelper(
+      platform: windows,
+      version: '1.2.5-beta',
+      exec: (command) async {
+        expect(command, contains(r'$env:USERPROFILE'));
+        expect(command, contains('pocketbot-remote-1.2.5-beta.exe'));
+        return r'READY C:\Users\me\.pocketbot\pocketbot-remote-1.2.5-beta.exe';
+      },
+      upload: (_, __) async => fail('should not upload'),
+      download: (_) async {
+        downloads += 1;
+        return const [1];
+      },
+    );
+    expect(downloads, 0);
+    expect(ready, r'C:\Users\me\.pocketbot\pocketbot-remote-1.2.5-beta.exe');
+
+    var probes = 0;
+    String? uploadedTo;
+    final installed = await ensureRemoteHelper(
+      platform: windows,
+      version: '1.2.5-beta',
+      exec: (command) async {
+        if (command.contains('Write-Output')) {
+          probes += 1;
+          if (probes < 3) return 'MISSING';
+          return r'READY C:\Users\me\.pocketbot\pocketbot-remote-1.2.5-beta.exe';
+        }
+        if (command.contains('Invoke-WebRequest')) throw Exception('offline');
+        if (command.contains('%USERPROFILE%')) return r'C:\Users\me';
+        return '';
+      },
+      upload: (remotePath, bytes) async {
+        uploadedTo = remotePath;
+        expect(bytes, [9, 8]);
+      },
+      download: (_) async => [9, 8],
+    );
+    expect(installed, r'C:\Users\me\.pocketbot\pocketbot-remote-1.2.5-beta.exe');
+    expect(uploadedTo, r'C:\Users\me\.pocketbot\pocketbot-remote-1.2.5-beta.exe');
+  });
 }

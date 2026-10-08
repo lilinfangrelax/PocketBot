@@ -110,5 +110,97 @@ void main() {
     expect(prepared.agentLabel, 'Gemini CLI');
     expect(prepared.toJson()['agentId'], 'gemini');
     expect(prepared.toJson().containsKey('archiveUrl'), isFalse);
+    expect(prepared.toJson().containsKey('resumeAgent'), isFalse);
+  });
+
+  test('prefers a binary distribution and keeps runtime fields out of json', () {
+    final agents = parseAcpRegistry('''
+    {
+      "agents": [
+        {
+          "id": "kilo",
+          "name": "Kilo",
+          "version": "1.2.0",
+          "distribution": {
+            "binary": {
+              "linux-x86_64": {
+                "archive": "https://example.com/kilo.tar.gz",
+                "cmd": "./kilo",
+                "args": ["acp"],
+                "sha256": "abc",
+                "env": {"KILO_HOME": "/opt/kilo"}
+              }
+            },
+            "npx": {"package": "kilo", "cmd": "kilo", "args": ["acp"]}
+          }
+        },
+        {"name": "missing-id"}
+      ]
+    }
+    ''');
+    expect(agents, hasLength(1));
+    final launch = agents.single.launchFor(
+      const RemotePlatform(os: 'linux', arch: 'x86_64'),
+    );
+    expect(launch?.archiveUrl, 'https://example.com/kilo.tar.gz');
+    expect(launch?.sha256, 'abc');
+    expect(launch?.env['KILO_HOME'], '/opt/kilo');
+    expect(launch?.command, './kilo');
+    expect(launch?.legacyArgv, isEmpty);
+
+    final saved = GatewayInfo.local(agentId: 'kilo', agentLabel: 'Kilo').copyWith(
+      archiveUrl: launch?.archiveUrl,
+      resumeAgent: true,
+    );
+    final json = saved.toJson();
+    expect(json['agentId'], 'kilo');
+    expect(json['agentLabel'], 'Kilo');
+    expect(json.containsKey('archiveUrl'), isFalse);
+    final restored = GatewayInfo.fromJson(json);
+    expect(restored.agentId, 'kilo');
+    expect(restored.archiveUrl, isNull);
+    expect(restored.resumeAgent, isFalse);
+  });
+
+  test('prepareGatewayLaunch reports a missing or unsupported agent', () async {
+    const platform = RemotePlatform(os: 'linux', arch: 'aarch64');
+    final unchanged = GatewayInfo.ssh(
+      host: '10.0.0.8',
+      username: 'me',
+      command: 'custom',
+    );
+    expect(
+      await prepareGatewayLaunch(
+        unchanged,
+        platform,
+        loadAgents: () async => throw StateError('should not load'),
+      ),
+      same(unchanged),
+    );
+
+    await expectLater(
+      prepareGatewayLaunch(
+        GatewayInfo.local(agentId: 'missing'),
+        platform,
+        loadAgents: () async => parseAcpRegistry(registry),
+      ),
+      throwsA(predicate((error) => '$error'.contains('AGENT_NOT_IN_REGISTRY'))),
+    );
+    await expectLater(
+      prepareGatewayLaunch(
+        GatewayInfo.local(agentId: 'gemini'),
+        platform,
+        loadAgents: () async => throw Exception('REGISTRY_UNAVAILABLE:offline'),
+      ),
+      throwsA(predicate((error) => '$error'.contains('REGISTRY_UNAVAILABLE'))),
+    );
+    expect(
+      await prepareGatewayLaunch(
+        GatewayInfo.local(agentId: 'cursor', command: 'agent'),
+        platform,
+        loadAgents: () async => throw Exception('REGISTRY_UNAVAILABLE:offline'),
+      ),
+      predicate<GatewayInfo>((gateway) => gateway.command == 'agent' && gateway.archiveUrl == null),
+    );
   });
 }
