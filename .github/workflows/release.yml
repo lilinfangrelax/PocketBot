@@ -198,11 +198,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
+      - name: Setup Dart
+        uses: dart-lang/setup-dart@v1
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: 'stable'
+          sdk: stable
 
       - name: Compile pocketbot-remote
         shell: bash
