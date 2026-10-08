@@ -222,9 +222,10 @@ class _ChatScreenState extends State<ChatScreen> {
     if (session == null) return const SizedBox.shrink();
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      clipBehavior: Clip.hardEdge,
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       decoration: BoxDecoration(
-        color: isDarkMode ? const Color(0xFF191919) : const Color(0xFFF7F7F7),
+        color: isDarkMode ? const Color(0xFF141414) : const Color(0xFFF7F7F7),
         border: Border(
           bottom: BorderSide(
             color: isDarkMode ? Colors.grey[800]! : Colors.grey[200]!,
@@ -416,17 +417,31 @@ class _ChatScreenState extends State<ChatScreen> {
                   .toList(),
             ),
           ];
-    return SizedBox(
-      height: 36,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: options.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (context, index) {
-          return _buildConfigOptionControl(
-              options[index], wsService, isDarkMode);
-        },
-      ),
+    final children = <Widget>[];
+    for (final option in options) {
+      if (!option.isBoolean && option.isSelect && option.options.length <= 4) {
+        for (final value in option.options) {
+          children.add(
+            ChoiceChip(
+              label: Text(value.name, style: const TextStyle(fontSize: 11)),
+              selected: option.currentId == value.value,
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              onSelected: (_) =>
+                  _changeConfigOption(wsService, option, value.value),
+            ),
+          );
+        }
+      } else {
+        children.add(
+            _buildConfigOptionControl(option, wsService, isDarkMode));
+      }
+    }
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: children,
     );
   }
 
@@ -452,26 +467,6 @@ class _ChatScreenState extends State<ChatScreen> {
             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             onChanged: (value) => _changeConfigOption(wsService, option, value),
           ),
-        ],
-      );
-    }
-
-    if (option.isSelect && option.options.length <= 4) {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (final value in option.options)
-            Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: ChoiceChip(
-                label: Text(value.name, style: const TextStyle(fontSize: 11)),
-                selected: option.currentId == value.value,
-                visualDensity: VisualDensity.compact,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                onSelected: (_) =>
-                    _changeConfigOption(wsService, option, value.value),
-              ),
-            ),
         ],
       );
     }
@@ -1080,7 +1075,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             wsService.currentSessionKey ?? 'default'),
                         controller: _scrollController,
                         reverse: false, // 最新消息显示在最下方
-                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        padding: const EdgeInsets.fromLTRB(0, 8, 0, 12),
                         itemCount: _messageItems.length,
                         shrinkWrap: false,
                         // 添加缓存区域，减少滚动时的重建
@@ -1328,9 +1323,17 @@ class _ChatScreenState extends State<ChatScreen> {
       return _buildSystemBubble(message, isDarkMode);
     }
     if (message.kind == MessageKind.thought) {
-      return _buildThoughtBubble(message, isDarkMode);
+      return _ThoughtBlock(
+        key: ValueKey(message.id),
+        message: message,
+        isDarkMode: isDarkMode,
+        service: _wsService,
+      );
     }
-    if (message.kind == MessageKind.tool || message.kind == MessageKind.plan) {
+    if (message.kind == MessageKind.plan) {
+      return _buildPlanBubble(message, isDarkMode);
+    }
+    if (message.kind == MessageKind.tool) {
       return _buildToolBubble(message, isDarkMode);
     }
 
@@ -1368,25 +1371,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         bottomRight: Radius.circular(2),
                       ),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (message.attachments.isNotEmpty)
-                          AttachmentRow(
-                            attachments: message.attachments,
-                            isUser: isUser,
-                            isDarkMode: isDarkMode,
-                          ),
-                        Flexible(
-                          child: MarkdownMessageView(
-                            content: message.text,
-                            isDarkMode: isDarkMode,
-                            isUser: isUser,
-                          ),
-                        ),
-                      ],
-                    ),
+                    child: _buildBubbleBody(message, isDarkMode, isUser: true),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1414,7 +1399,7 @@ class _ChatScreenState extends State<ChatScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: isDarkMode ? const Color(0xFF262626) : Colors.white,
+                color: isDarkMode ? const Color(0xFF2C2C2C) : Colors.white,
                 borderRadius: BorderRadius.only(
                   topLeft: const Radius.circular(6),
                   topRight: const Radius.circular(6),
@@ -1424,27 +1409,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 border: Border.all(
                     color: isDarkMode ? Colors.grey[700]! : Colors.grey[300]!),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (message.attachments.isNotEmpty)
-                    AttachmentRow(
-                      attachments: message.attachments,
-                      isUser: isUser,
-                      isDarkMode: isDarkMode,
-                    ),
-                  Flexible(
-                    child: message.isStreaming
-                        ? _buildLivePlainText(message, isDarkMode)
-                        : MarkdownMessageView(
-                            content: message.text,
-                            isDarkMode: isDarkMode,
-                            isUser: isUser,
-                          ),
-                  ),
-                ],
-              ),
+              child: _buildBubbleBody(message, isDarkMode, isUser: false),
             ),
           ),
         ],
@@ -1488,22 +1453,102 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildThoughtBubble(Message message, bool isDarkMode) {
+  Widget _buildBubbleBody(
+    Message message,
+    bool isDarkMode, {
+    required bool isUser,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (message.attachments.isNotEmpty)
+          AttachmentRow(
+            attachments: message.attachments,
+            isUser: isUser,
+            isDarkMode: isDarkMode,
+          ),
+        message.isStreaming
+            ? _buildLivePlainText(message, isDarkMode)
+            : MarkdownMessageView(
+                content: message.text,
+                isDarkMode: isDarkMode,
+                isUser: isUser,
+              ),
+      ],
+    );
+  }
+
+  Widget _buildToolBubble(Message message, bool isDarkMode) {
+    final status = message.toolStatus ?? '';
+    final color = status == 'failed'
+        ? Colors.red
+        : status == 'completed'
+            ? Colors.green
+            : Colors.orange;
+    final icon = message.kind == MessageKind.plan
+        ? Icons.checklist
+        : Icons.build_outlined;
+    final lines = message.text
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
+    final title = lines.isEmpty ? '工具调用' : lines.first;
+    final detail = lines.length > 1 ? lines.sublist(1).join(' · ') : '';
     return Padding(
-      padding: const EdgeInsets.fromLTRB(56, 2, 72, 2),
-      child: _buildLivePlainText(
-        message,
-        isDarkMode,
-        style: TextStyle(
-          fontSize: 12,
-          fontStyle: FontStyle.italic,
-          color: isDarkMode ? Colors.grey[500] : Colors.grey[600],
+      padding: const EdgeInsets.fromLTRB(56, 2, 16, 2),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: isDarkMode ? const Color(0xFF232323) : const Color(0xFFF0F0F0),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                detail.isEmpty ? title : '$title · $detail',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isDarkMode ? Colors.grey[300] : Colors.grey[800],
+                ),
+              ),
+            ),
+            if (status.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              Text(
+                _toolStatusLabel(status),
+                style: TextStyle(fontSize: 11, color: color),
+              ),
+            ],
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildToolBubble(Message message, bool isDarkMode) {
+  String _toolStatusLabel(String status) {
+    switch (status) {
+      case 'completed':
+        return '完成';
+      case 'in_progress':
+        return '进行中';
+      case 'pending':
+        return '等待';
+      case 'failed':
+        return '失败';
+      default:
+        return status;
+    }
+  }
+
+  Widget _buildPlanBubble(Message message, bool isDarkMode) {
     final status = message.toolStatus ?? '';
     final color = status == 'failed'
         ? Colors.red
@@ -1542,7 +1587,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             if (status.isNotEmpty)
               Text(
-                status,
+                _toolStatusLabel(status),
                 style: TextStyle(fontSize: 11, color: color),
               ),
           ],
@@ -1713,6 +1758,96 @@ class _ChatScreenState extends State<ChatScreen> {
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+}
+
+/// Collapsed preview of an agent thought. Tap to expand the full text.
+class _ThoughtBlock extends StatefulWidget {
+  final Message message;
+  final bool isDarkMode;
+  final WebSocketService? service;
+
+  const _ThoughtBlock({
+    super.key,
+    required this.message,
+    required this.isDarkMode,
+    required this.service,
+  });
+
+  @override
+  State<_ThoughtBlock> createState() => _ThoughtBlockState();
+}
+
+class _ThoughtBlockState extends State<_ThoughtBlock> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final message = widget.message;
+    final service = widget.service;
+    if (service != null && message.isStreaming) {
+      return ValueListenableBuilder<int>(
+        valueListenable: service.streamingTick,
+        builder: (_, __, ___) {
+          return _card(service.streamingTextFor(message.id) ?? message.text);
+        },
+      );
+    }
+    return _card(message.text);
+  }
+
+  Widget _card(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return const SizedBox.shrink();
+    final isDarkMode = widget.isDarkMode;
+    final muted = isDarkMode ? Colors.grey[500]! : Colors.grey[600]!;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(56, 4, 16, 4),
+      child: Material(
+        color: isDarkMode ? const Color(0xFF222222) : const Color(0xFFEDEDED),
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => setState(() => _expanded = !_expanded),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.psychology_outlined, size: 14, color: muted),
+                    const SizedBox(width: 6),
+                    Text(
+                      widget.message.isStreaming ? '思考中' : '思考',
+                      style: TextStyle(fontSize: 11, color: muted),
+                    ),
+                    const Spacer(),
+                    Icon(
+                      _expanded ? Icons.expand_less : Icons.expand_more,
+                      size: 16,
+                      color: muted,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  trimmed,
+                  maxLines: _expanded ? null : 2,
+                  overflow:
+                      _expanded ? TextOverflow.visible : TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.35,
+                    color: muted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

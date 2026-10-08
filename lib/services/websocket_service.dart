@@ -1284,9 +1284,26 @@ class WebSocketService with ChangeNotifier {
 
   void _upsertToolCall(SessionState session, Map<String, dynamic> update) {
     final toolCallId = update['toolCallId'] as String? ?? _generateId();
-    final status = update['status'] as String? ?? 'in_progress';
-    final title = update['title'] as String? ??
-        update['kind'] as String? ??
+    final id = 'tool-$toolCallId';
+    final index = session.messages.indexWhere((message) => message.id == id);
+    final previous = index >= 0 ? session.messages[index] : null;
+    final previousLines = (previous?.text ?? '')
+        .split('\n')
+        .where((line) => line.trim().isNotEmpty)
+        .toList();
+    final previousTitle =
+        previousLines.isEmpty ? null : previousLines.first.trim();
+    final previousDetail =
+        previousLines.length > 1 ? previousLines.sublist(1).join('\n') : '';
+    final status = _nonEmpty(update['status']) ??
+        previous?.toolStatus ??
+        'in_progress';
+    final title = _nonEmpty(update['title']) ??
+        _nonEmpty(update['toolName']) ??
+        _nonEmpty(update['name']) ??
+        previousTitle ??
+        _nonEmpty(update['kind']) ??
+        _toolTitleFromRawInput(update['rawInput']) ??
         '工具调用';
     final detail = _contentToText(update['content']);
     final locations = update['locations'] as List? ?? const [];
@@ -1294,14 +1311,14 @@ class WebSocketService with ChangeNotifier {
       final loc = _asMap(item);
       return loc['path'] as String? ?? '';
     }).where((path) => path.isNotEmpty).join(', ');
-    final text = [
-      title,
+    final body = [
       if (locationText.isNotEmpty) locationText,
-      if (detail.isNotEmpty) detail,
+      if (detail.isNotEmpty) detail else if (previousDetail.isNotEmpty) previousDetail,
     ].join('\n');
+    final text = body.isEmpty ? title : '$title\n$body';
     _upsertSpecialMessage(
       session,
-      id: 'tool-$toolCallId',
+      id: id,
       kind: MessageKind.tool,
       text: text,
       toolCallId: toolCallId,
@@ -1309,6 +1326,20 @@ class WebSocketService with ChangeNotifier {
       streaming: _promptInFlight &&
           (status == 'pending' || status == 'in_progress'),
     );
+  }
+
+  String? _toolTitleFromRawInput(dynamic raw) {
+    final map = _asMap(raw);
+    return _nonEmpty(map['command']) ??
+        _nonEmpty(map['path']) ??
+        _nonEmpty(map['file_path']) ??
+        _nonEmpty(map['query']);
+  }
+
+  String? _nonEmpty(dynamic value) {
+    if (value is! String) return null;
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? null : trimmed;
   }
 
   void _upsertSpecialMessage(
@@ -1368,11 +1399,14 @@ class WebSocketService with ChangeNotifier {
     switch (map['type']) {
       case 'text':
         return map['text'] as String? ?? '';
+      case 'content':
+        return _contentToText(map['content']);
       case 'diff':
         return map['path'] as String? ?? '';
       case 'resource_link':
         return map['uri'] as String? ?? map['name'] as String? ?? '';
       default:
+        if (map['content'] != null) return _contentToText(map['content']);
         return map['text'] as String? ?? '';
     }
   }

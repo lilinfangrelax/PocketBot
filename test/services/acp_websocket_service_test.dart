@@ -252,6 +252,58 @@ void main() {
     expect(service.availableCommands.single.name, 'reset');
   });
 
+  test('keeps the tool title when a later update only changes status', () async {
+    final transport = _FakeAcpTransport();
+    final service = WebSocketService();
+    addTearDown(() async {
+      await service.disconnect();
+      await transport.close();
+    });
+
+    await _connectFake(service, transport);
+    transport.push({
+      'jsonrpc': '2.0',
+      'method': 'session/update',
+      'params': {
+        'sessionId': 'session-1',
+        'update': {
+          'sessionUpdate': 'tool_call',
+          'toolCallId': 'call-1',
+          'title': 'Read lib/main.dart',
+          'kind': 'read',
+          'status': 'in_progress',
+          'content': [
+            {
+              'type': 'content',
+              'content': {'type': 'text', 'text': 'first 40 lines'},
+            },
+          ],
+        },
+      },
+    });
+    transport.push({
+      'jsonrpc': '2.0',
+      'method': 'session/update',
+      'params': {
+        'sessionId': 'session-1',
+        'update': {
+          'sessionUpdate': 'tool_call_update',
+          'toolCallId': 'call-1',
+          'status': 'completed',
+        },
+      },
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    final session = service.getSession('session-1');
+    expect(session, isNotNull);
+    expect(session!.messages, hasLength(1));
+    expect(session.messages.single.toolStatus, 'completed');
+    expect(session.messages.single.text, contains('Read lib/main.dart'));
+    expect(session.messages.single.text, contains('first 40 lines'));
+    expect(session.messages.single.text, isNot(contains('工具调用')));
+  });
+
   test('auto-skips cursor/ask_question when no chat UI is attached', () async {
     final transport = _FakeAcpTransport();
     final service = WebSocketService();
