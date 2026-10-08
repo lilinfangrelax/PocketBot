@@ -37,8 +37,8 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        // versionCode is derived from the semver name. Do not use the `+`
-        // build number from pubspec.yaml; that counter resets across releases.
+        // versionCode follows MAJOR.MINOR.PATCH. Each release increments the
+        // patch (1.2.1, 1.2.2, ...); do not encode a beta.N counter.
         versionCode = androidVersionCode(flutter.versionName)
         versionName = flutter.versionName
     }

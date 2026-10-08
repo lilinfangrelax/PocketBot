@@ -1,11 +1,11 @@
-/// Android [versionCode] derived from a semantic version.
+/// Android [versionCode] derived from `MAJOR.MINOR.PATCH`.
 ///
-/// The number after `+` in `pubspec.yaml` is not used. Android only accepts
-/// an integer that must increase on every install, so a later `1.2.1-beta.1`
-/// cannot reuse build number 1.
+/// Releases increment the patch: `1.2.1`, then `1.2.2`. The `+` build suffix
+/// is ignored. A `beta.N` suffix is still parsed so already published packages
+/// sort below the next plain version.
 ///
 /// Layout: `major * 10000000 + minor * 100000 + patch * 1000 + pre`.
-/// `pre` is 1–499 for `beta.N`, 501–899 for `rc.N`, and 900 for a stable release.
+/// Plain releases use `pre = 900`.
 int androidVersionCode(String versionName) {
   final withoutBuild = versionName.split('+').first.trim();
   final match = RegExp(

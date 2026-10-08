@@ -26,14 +26,18 @@ void main() {
     );
   });
 
-  test('a later release is newer than the previous stable version', () {
+  test('plain patch versions keep increasing past older beta tags', () {
     expect(
-      androidVersionCode('1.2.1-beta.1'),
-      greaterThan(androidVersionCode('1.2.0')),
+      androidVersionCode('1.2.2'),
+      greaterThan(androidVersionCode('1.2.1')),
+    );
+    expect(
+      androidVersionCode('1.2.1'),
+      greaterThan(androidVersionCode('1.2.0-beta.8')),
     );
     expect(
       androidVersionCode('1.3.0'),
-      greaterThan(androidVersionCode('1.2.1-beta.1')),
+      greaterThan(androidVersionCode('1.2.2')),
     );
   });
 }
