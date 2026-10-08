@@ -1,11 +1,11 @@
 {
-    "name": "pocket_bot",
-    "short_name": "pocket_bot",
+    "name": "PocketBot",
+    "short_name": "PocketBot",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#10141C",
+    "theme_color": "#10141C",
+    "description": "A mobile client for ACP agents.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
