@@ -14,6 +14,9 @@ import 'package:pocket_bot/utils/logger.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+export 'package:pocket_bot/services/remote_helper.dart'
+    show opensshPathToWindows;
+
 /// Byte/text pipe that carries ACP JSON-RPC frames.
 abstract class AcpTransport {
   Stream<dynamic> get incoming;
@@ -162,17 +165,6 @@ bool isOpensshWindowsPath(String path) {
   return RegExp(r'^/[a-zA-Z]:(?:/|$)').hasMatch(path.replaceAll('\\', '/'));
 }
 
-/// Converts `/d:/Work` to `D:\Work` for `cmd /c`. Other paths are unchanged.
-String opensshPathToWindows(String path) {
-  final slash = path.replaceAll('\\', '/');
-  final match = RegExp(r'^/([a-zA-Z]):/?(.*)$').firstMatch(slash);
-  if (match == null) return path;
-  final drive = match.group(1)!.toUpperCase();
-  final rest = match.group(2)!;
-  if (rest.isEmpty) return '$drive:\\';
-  return '$drive:\\${rest.replaceAll('/', r'\')}';
-}
-
 /// SFTP on Windows OpenSSH prefers forward slashes (`C:/Users`).
 String toSftpPath(String path) => path.replaceAll('\\', '/');
 
@@ -242,8 +234,7 @@ String formatRemoteAgentExit({int? exitCode, String stderr = ''}) {
       lower.contains('不是内部或外部命令') && lower.contains('cd')) {
     return 'AGENT_EXIT:远程工作目录不存在，或当前账号无法进入该目录。';
   }
-  if (lower.contains('不是内部或外部命令') ||
-      lower.contains('is not recognized')) {
+  if (lower.contains('不是内部或外部命令') || lower.contains('is not recognized')) {
     return 'AGENT_EXIT:远程电脑找不到 agent。请安装 Cursor Agent，并确认 SSH 登录后能运行 agent acp。';
   }
   if (line.isNotEmpty) {
@@ -549,7 +540,8 @@ Future<_LocalLaunch> _localLaunch(GatewayInfo target) async {
       if (target.legacyArgv.isEmpty) {
         throw Exception('无法下载代理: $error');
       }
-      Logger.warning('[ACP] archive download failed, using installed agent: $error');
+      Logger.warning(
+          '[ACP] archive download failed, using installed agent: $error');
       final resolved = await CursorAgent.resolve(target.legacyArgv.first);
       return _LocalLaunch(
         executable: resolved.executable,

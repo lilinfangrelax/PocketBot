@@ -1,6 +1,22 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pocket_bot/services/remote_helper.dart';
 import 'package:pocketbot_remote/pocketbot_remote.dart';
+
+/// Decodes `powershell -EncodedCommand` the way Windows PowerShell does.
+String powershellScript(String command) {
+  const marker = '-EncodedCommand ';
+  final index = command.indexOf(marker);
+  if (index < 0) return command;
+  final bytes = base64Decode(command.substring(index + marker.length).trim());
+  final data = ByteData.sublistView(bytes);
+  final units = <int>[
+    for (var i = 0; i < bytes.length; i += 2) data.getUint16(i, Endian.little),
+  ];
+  return String.fromCharCodes(units);
+}
 
 void main() {
   const linux = RemotePlatform(os: 'linux', arch: 'x86_64');
@@ -17,12 +33,39 @@ void main() {
       version: '1.2.5-beta',
       url: 'https://example.com/pocketbot-remote-windows-x64.exe',
     );
-    expect(download, contains('pocketbot-remote-1.2.5-beta.exe'));
-    expect(download, contains(r'$env:USERPROFILE'));
-    expect(download, contains('https://example.com/pocketbot-remote-windows-x64.exe'));
+    expect(download, isNot(contains('"')));
+    final script = powershellScript(download);
+    expect(script, contains('pocketbot-remote-1.2.5-beta.exe'));
+    expect(script, contains(r'$env:USERPROFILE'));
+    expect(script,
+        contains('https://example.com/pocketbot-remote-windows-x64.exe'));
   });
 
-  test('reads the READY path and installs by upload when the host is offline', () async {
+  test('windows probe has no quote cmd can turn into an open string', () {
+    final command = helperProbeCommand(windows, '1.2.9-beta');
+    expect(command,
+        startsWith('powershell -NoProfile -NonInteractive -EncodedCommand '));
+    expect(command, isNot(contains('"')));
+    final script = powershellScript(command);
+    expect(script, contains(r"$ver = ''"));
+    expect(script, isNot(contains('""')));
+    expect(script, contains(r'$env:USERPROFILE'));
+    expect(script, contains('pocketbot-remote-1.2.9-beta.exe'));
+    expect(script, contains("Write-Output 'MISSING'"));
+  });
+
+  test('maps an OpenSSH drive path before launching on Windows', () {
+    expect(
+      remoteLaunchDirectory(windows, '/d:/Dev/Rust/teshi/dev'),
+      r'D:\Dev\Rust\teshi\dev',
+    );
+    expect(remoteLaunchDirectory(windows, r'D:\Dev\app'), r'D:\Dev\app');
+    expect(remoteLaunchDirectory(windows, ''), '.');
+    expect(remoteLaunchDirectory(linux, '/home/me/dev'), '/home/me/dev');
+  });
+
+  test('reads the READY path and installs by upload when the host is offline',
+      () async {
     expect(readyHelperPath('noise\nREADY /home/me/.pocketbot/helper\n'),
         '/home/me/.pocketbot/helper');
 
@@ -54,14 +97,16 @@ void main() {
     expect(commands.any((command) => command.contains('curl')), isTrue);
   });
 
-  test('keeps an already installed helper and uploads the windows build', () async {
+  test('keeps an already installed helper and uploads the windows build',
+      () async {
     var downloads = 0;
     final ready = await ensureRemoteHelper(
       platform: windows,
       version: '1.2.5-beta',
       exec: (command) async {
-        expect(command, contains(r'$env:USERPROFILE'));
-        expect(command, contains('pocketbot-remote-1.2.5-beta.exe'));
+        final script = powershellScript(command);
+        expect(script, contains(r'$env:USERPROFILE'));
+        expect(script, contains('pocketbot-remote-1.2.5-beta.exe'));
         return r'READY C:\Users\me\.pocketbot\pocketbot-remote-1.2.5-beta.exe';
       },
       upload: (_, __) async => fail('should not upload'),
@@ -79,12 +124,13 @@ void main() {
       platform: windows,
       version: '1.2.5-beta',
       exec: (command) async {
-        if (command.contains('Write-Output')) {
+        final script = powershellScript(command);
+        if (script.contains('Write-Output')) {
           probes += 1;
           if (probes < 3) return 'MISSING';
           return r'READY C:\Users\me\.pocketbot\pocketbot-remote-1.2.5-beta.exe';
         }
-        if (command.contains('Invoke-WebRequest')) throw Exception('offline');
+        if (script.contains('Invoke-WebRequest')) throw Exception('offline');
         if (command.contains('%USERPROFILE%')) return r'C:\Users\me';
         return '';
       },
@@ -94,7 +140,9 @@ void main() {
       },
       download: (_) async => [9, 8],
     );
-    expect(installed, r'C:\Users\me\.pocketbot\pocketbot-remote-1.2.5-beta.exe');
-    expect(uploadedTo, r'C:\Users\me\.pocketbot\pocketbot-remote-1.2.5-beta.exe');
+    expect(
+        installed, r'C:\Users\me\.pocketbot\pocketbot-remote-1.2.5-beta.exe');
+    expect(
+        uploadedTo, r'C:\Users\me\.pocketbot\pocketbot-remote-1.2.5-beta.exe');
   });
 }

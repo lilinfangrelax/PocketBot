@@ -44,15 +44,71 @@ String? readyHelperPath(String output) {
   return null;
 }
 
+/// Converts `/d:/Work` to `D:\Work`. Other paths are unchanged.
+String opensshPathToWindows(String path) {
+  final slash = path.replaceAll('\\', '/');
+  final match = RegExp(r'^/([a-zA-Z]):/?(.*)$').firstMatch(slash);
+  if (match == null) return path;
+  final drive = match.group(1)!.toUpperCase();
+  final rest = match.group(2)!;
+  if (rest.isEmpty) return '$drive:\\';
+  return '$drive:\\${rest.replaceAll('/', r'\')}';
+}
+
+/// Directory the remote helper should use. OpenSSH shows a Windows drive as
+/// `/d:/Work`, which `cmd` and `Process.start` both reject.
+String remoteLaunchDirectory(RemotePlatform platform, String path) {
+  final trimmed = path.trim();
+  final cwd = trimmed.isEmpty ? '.' : trimmed;
+  if (!platform.isWindows) return cwd;
+  return opensshPathToWindows(cwd);
+}
+
+/// Runs [script] through Windows OpenSSH without cmd.exe eating quotes.
+///
+/// A double-quoted `powershell -Command "..."` is parsed by cmd first, and
+/// `""` collapses into one `"`. PowerShell then reports
+/// `The string is missing the terminator`.
+String powershellEncodedCommand(String script) {
+  final units = script.codeUnits;
+  final bytes = Uint8List(units.length * 2);
+  final data = ByteData.sublistView(bytes);
+  for (var i = 0; i < units.length; i++) {
+    data.setUint16(i * 2, units[i], Endian.little);
+  }
+  return 'powershell -NoProfile -NonInteractive -EncodedCommand '
+      '${base64Encode(bytes)}';
+}
+
+String _psSingleQuote(String value) => "'${value.replaceAll("'", "''")}'";
+
+String _windowsProbeScript(String version) {
+  final exe = _psSingleQuote('.pocketbot\\pocketbot-remote-$version.exe');
+  final expected = _psSingleQuote(version);
+  return "\$p = Join-Path \$env:USERPROFILE $exe; "
+      "\$ver = ''; "
+      'if (Test-Path -LiteralPath \$p) { '
+      '\$ver = (& \$p version | Out-String).Trim() }; '
+      "if (\$ver -eq $expected) { Write-Output ('READY ' + \$p) } "
+      "else { Write-Output 'MISSING' }";
+}
+
+String _windowsDownloadScript({
+  required String version,
+  required String url,
+}) {
+  final dir = _psSingleQuote('.pocketbot');
+  final exe = _psSingleQuote('pocketbot-remote-$version.exe');
+  final uri = _psSingleQuote(url);
+  return "\$d = Join-Path \$env:USERPROFILE $dir; "
+      'New-Item -ItemType Directory -Force -Path \$d | Out-Null; '
+      "\$p = Join-Path \$d $exe; "
+      "Invoke-WebRequest -Uri $uri -OutFile \$p";
+}
+
 String helperProbeCommand(RemotePlatform platform, String version) {
   if (platform.isWindows) {
-    return 'powershell -NoProfile -Command "'
-        '\$p = Join-Path \$env:USERPROFILE '
-        "'.pocketbot\\pocketbot-remote-$version.exe'; "
-        '\$ver = ""; '
-        'if (Test-Path \$p) { \$ver = (& \$p version | Out-String).Trim() }; '
-        "if (\$ver -eq '$version') { Write-Output ('READY ' + \$p) } "
-        'else { Write-Output \'MISSING\' }"';
+    return powershellEncodedCommand(_windowsProbeScript(version));
   }
   return "sh -c 'p=\"\$HOME/.pocketbot/pocketbot-remote-$version\"; "
       "ver=\"\"; if [ -x \"\$p\" ]; then ver=\$(\"\$p\" version 2>/dev/null || true); fi; "
@@ -65,11 +121,9 @@ String helperRemoteDownloadCommand({
   required String url,
 }) {
   if (platform.isWindows) {
-    return 'powershell -NoProfile -Command "'
-        '\$d = Join-Path \$env:USERPROFILE \'.pocketbot\'; '
-        'New-Item -ItemType Directory -Force -Path \$d | Out-Null; '
-        "\$p = Join-Path \$d 'pocketbot-remote-$version.exe'; "
-        "Invoke-WebRequest -Uri '$url' -OutFile \$p\"";
+    return powershellEncodedCommand(
+      _windowsDownloadScript(version: version, url: url),
+    );
   }
   return "sh -c 'mkdir -p \"\$HOME/.pocketbot\" && "
       "(curl -fsSL -o \"\$HOME/.pocketbot/pocketbot-remote-$version.partial\" \"$url\" "
@@ -209,8 +263,14 @@ Future<String> execRemote(SSHClient client, String command) async {
   final stdout = StringBuffer();
   final stderr = StringBuffer();
   await Future.wait([
-    session.stdout.cast<List<int>>().transform(utf8.decoder).forEach(stdout.write),
-    session.stderr.cast<List<int>>().transform(utf8.decoder).forEach(stderr.write),
+    session.stdout
+        .cast<List<int>>()
+        .transform(utf8.decoder)
+        .forEach(stdout.write),
+    session.stderr
+        .cast<List<int>>()
+        .transform(utf8.decoder)
+        .forEach(stderr.write),
   ]);
   await session.done;
   final out = stdout.toString();
@@ -268,10 +328,9 @@ Future<String> remoteHelperCommand({
     platform: platform,
     version: version,
   );
-  final archived = prepared.archiveUrl != null && prepared.archiveUrl!.isNotEmpty;
-  final cwd = prepared.workingDirectory.trim().isEmpty
-      ? '.'
-      : prepared.workingDirectory;
+  final archived =
+      prepared.archiveUrl != null && prepared.archiveUrl!.isNotEmpty;
+  final cwd = remoteLaunchDirectory(platform, prepared.workingDirectory);
   return buildRemoteHelperCommand(
     windows: platform.isWindows,
     helperPath: helperPath,
