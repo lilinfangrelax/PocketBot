@@ -711,6 +711,15 @@ class _FakeAcpTransport implements AcpTransport {
     if (!_incoming.isClosed) await _incoming.close();
   }
 
+  @override
+  Future<bool> get resumed async => false;
+
+  @override
+  String? get startupError => null;
+
+  @override
+  void release() {}
+
   void push(Map<String, dynamic> message) {
     _incoming.add(jsonEncode(message));
   }

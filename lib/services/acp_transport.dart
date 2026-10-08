@@ -485,6 +485,15 @@ class LocalStdioTransport implements AcpTransport {
   Stream<dynamic> get incoming => _incoming.stream;
 
   @override
+  Future<bool> get resumed async => false;
+
+  @override
+  String? get startupError => null;
+
+  @override
+  void release() {}
+
+  @override
   void send(String jsonFrame) {
     try {
       _commandPort.send(<String, dynamic>{
@@ -866,6 +875,15 @@ class WebSocketAcpTransport implements AcpTransport {
 
   @override
   Stream<dynamic> get incoming => _incoming.stream;
+
+  @override
+  Future<bool> get resumed async => false;
+
+  @override
+  String? get startupError => null;
+
+  @override
+  void release() {}
 
   @override
   void send(String jsonFrame) {

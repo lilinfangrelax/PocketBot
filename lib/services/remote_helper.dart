@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
 import 'package:dio/dio.dart';
@@ -131,7 +132,7 @@ Future<String> _uploadedHelperPath({
 }) async {
   final home = (await exec(platform.isWindows
           ? r'cmd /c echo %USERPROFILE%'
-          : 'printf %s "$HOME"'))
+          : 'printf %s "\$HOME"'))
       .trim();
   if (home.isEmpty) {
     throw Exception('HELPER_INSTALL_FAILED:无法确定远程用户目录');
