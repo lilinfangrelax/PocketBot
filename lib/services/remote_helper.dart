@@ -335,7 +335,9 @@ Future<String> remoteHelperCommand({
     windows: platform.isWindows,
     helperPath: helperPath,
     sessionId: remoteAgentSessionId(
-      connectionId: prepared.connectionId,
+      connectionId: prepared.instanceTag.isEmpty
+          ? prepared.connectionId
+          : '${prepared.connectionId}|${prepared.instanceTag}',
       agentId: prepared.agentId,
       workingDirectory: cwd,
     ),

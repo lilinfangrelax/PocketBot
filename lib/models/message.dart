@@ -142,6 +142,10 @@ class GatewayInfo {
   final List<String> legacyArgv;
   final bool resumeAgent;
 
+  /// Separates agent processes that share a host, agent and folder, e.g. one
+  /// per AI contact. Not stored.
+  final String instanceTag;
+
   GatewayInfo({
     this.kind = AgentTransportKind.ssh,
     required this.host,
@@ -165,6 +169,7 @@ class GatewayInfo {
     this.launchEnv = const {},
     this.legacyArgv = const [],
     this.resumeAgent = false,
+    this.instanceTag = '',
   }) : port = port ?? (kind == AgentTransportKind.ssh ? 22 : 0);
 
   factory GatewayInfo.local({
@@ -224,6 +229,16 @@ class GatewayInfo {
       return 'local|$workingDirectory|$command';
     }
     return 'ssh|$username@$host:$port';
+  }
+
+  /// The machine this target runs on, independent of folder and agent.
+  String get hostId =>
+      kind == AgentTransportKind.local ? 'local' : connectionId;
+
+  String get hostLabel {
+    if (kind == AgentTransportKind.local) return '这台电脑';
+    final auth = username.isEmpty ? '' : '$username@';
+    return '$auth$host:$port';
   }
 
   String get displayLabel {
@@ -339,6 +354,7 @@ class GatewayInfo {
     Map<String, String>? launchEnv,
     List<String>? legacyArgv,
     bool? resumeAgent,
+    String? instanceTag,
   }) {
     return GatewayInfo(
       kind: kind ?? this.kind,
@@ -363,6 +379,7 @@ class GatewayInfo {
       launchEnv: launchEnv ?? this.launchEnv,
       legacyArgv: legacyArgv ?? this.legacyArgv,
       resumeAgent: resumeAgent ?? this.resumeAgent,
+      instanceTag: instanceTag ?? this.instanceTag,
     );
   }
 

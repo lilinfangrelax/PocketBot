@@ -51,11 +51,16 @@ abstract class RemoteDirectorySource {
 /// SSH login plus SFTP (or shell) directory listing. The same [SSHClient]
 /// is later reused to spawn `agent acp` in the chosen working directory.
 class SshRemoteSession implements RemoteDirectorySource {
-  SshRemoteSession._(this._client, this._target);
+  SshRemoteSession._(
+    this._client,
+    this._target, {
+    Future<SSHClient> Function()? reopen,
+  }) : _reopen = reopen;
 
   SSHClient? _client;
   SftpClient? _sftp;
   final GatewayInfo _target;
+  final Future<SSHClient> Function()? _reopen;
   bool _ownsClient = true;
 
   SSHClient get client {
@@ -69,6 +74,18 @@ class SshRemoteSession implements RemoteDirectorySource {
   static Future<SshRemoteSession> connect(GatewayInfo target) async {
     final client = await openSshClient(target);
     return SshRemoteSession._(client, target);
+  }
+
+  /// Browses through a login someone else owns, such as [SshHostPool].
+  /// [reopen] fetches a fresh client when the connection drops; closing this
+  /// session leaves the client open.
+  factory SshRemoteSession.shared(
+    SSHClient client,
+    GatewayInfo target, {
+    required Future<SSHClient> Function() reopen,
+  }) {
+    return SshRemoteSession._(client, target, reopen: reopen)
+      .._ownsClient = false;
   }
 
   @override
@@ -215,6 +232,17 @@ class SshRemoteSession implements RemoteDirectorySource {
   }
 
   Future<bool> _reconnect() async {
+    final reopen = _reopen;
+    if (reopen != null) {
+      _sftp = null;
+      try {
+        _client = await reopen();
+        return true;
+      } catch (error) {
+        Logger.debug('[SSH] Reconnect failed: $error');
+        return false;
+      }
+    }
     if (!_ownsClient) return false;
     try {
       _client?.close();

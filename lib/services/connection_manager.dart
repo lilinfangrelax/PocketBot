@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,8 +9,10 @@ import 'package:pocket_bot/models/ai_contact_config.dart';
 import 'package:pocket_bot/models/mcp_server_config.dart';
 import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/services/acp_registry.dart';
+import 'package:pocket_bot/services/acp_transport.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
 import 'package:pocket_bot/services/remote_helper.dart';
+import 'package:pocket_bot/services/ssh_host_pool.dart';
 import 'package:pocket_bot/services/ssh_remote_session.dart';
 import 'package:pocket_bot/services/websocket_service.dart' as ws;
 import 'package:pocket_bot/utils/logger.dart';
@@ -33,6 +34,9 @@ class GatewayStatus {
 
 class ConnectionManager extends ChangeNotifier {
   final ws.WebSocketService _wsService;
+
+  /// SSH logins, one per host. A host is online when its login is up.
+  final SshHostPool hosts;
 
   ws.ConnectionState _state = ws.ConnectionState.disconnected;
   GatewayInfo? _gateway;
@@ -58,7 +62,11 @@ class ConnectionManager extends ChangeNotifier {
 
   static const _autoApproveKey = 'acp_auto_approve_permissions';
 
-  ConnectionManager() : _wsService = ws.WebSocketService() {
+  ConnectionManager({SshHostPool? hosts})
+      : _wsService = ws.WebSocketService(),
+        hosts = hosts ?? SshHostPool() {
+    _wsService.transportOpener = _openTransport;
+    this.hosts.addListener(notifyListeners);
     _loadPreferences();
     _loadSavedGateways().then((_) {
       final last = _gateway;
@@ -108,26 +116,67 @@ class ConnectionManager extends ChangeNotifier {
     await prefs.setBool(_autoApproveKey, value);
   }
 
-  /// Identifies one running agent: where it runs, in which folder, which agent.
-  static String profileKey(GatewayInfo gateway) =>
-      '${gateway.connectionId}|${gateway.workingDirectory.trim()}|${gateway.agentId}';
+  /// Identifies one running agent process. Tagged profiles (AI contacts) get
+  /// one process per host, agent and contact whatever folder they work in;
+  /// untagged ones are keyed by connection, folder and agent.
+  static String profileKey(GatewayInfo gateway) => gateway.instanceTag.isEmpty
+      ? '${gateway.connectionId}|${gateway.workingDirectory.trim()}|${gateway.agentId}'
+      : '${gateway.hostId}|${gateway.agentId}|${gateway.instanceTag}';
 
-  /// The saved connection a contact is bound to, narrowed to its folder and
-  /// agent. Null when the contact has no binding or the connection was deleted.
-  GatewayInfo? profileForContact(AIContactConfig config) {
-    if (!config.hasAgent) return null;
-    GatewayInfo? base;
+  static String contactInstanceTag(String contactId) => 'contact-$contactId';
+
+  /// The saved connection with [id], matched by [GatewayInfo.connectionId]
+  /// first and then by [GatewayInfo.hostId].
+  GatewayInfo? hostById(String id) {
+    if (id.isEmpty) return null;
     for (final gateway in _savedGateways) {
-      if (gateway.connectionId == config.gatewayId) base = gateway;
+      if (gateway.connectionId == id) return gateway;
     }
+    for (final gateway in _savedGateways) {
+      if (gateway.hostId == id) return gateway;
+    }
+    return null;
+  }
+
+  /// How [config]'s agent process is launched on [hostId] (the contact's own
+  /// host by default). Sessions pick their folder separately, so the launch
+  /// folder stays the same and the remote helper can resume the process.
+  /// Null when there is no such saved host.
+  GatewayInfo? profileForContact(AIContactConfig config, {String? hostId}) {
+    final base = hostById(hostId ?? config.gatewayId);
     if (base == null) return null;
+    final own = config.workingDirectory.trim();
+    final launchDirectory = own.isNotEmpty
+        ? own
+        : (base.kind == AgentTransportKind.ssh ? '.' : base.workingDirectory);
     return base.copyWith(
-      workingDirectory: config.workingDirectory.trim().isEmpty
-          ? base.workingDirectory
-          : config.workingDirectory.trim(),
+      workingDirectory: launchDirectory,
       agentId: config.agentId.isEmpty ? base.agentId : config.agentId,
       agentLabel:
           config.agentLabel.isEmpty ? base.agentLabel : config.agentLabel,
+      instanceTag: contactInstanceTag(config.contactId),
+    );
+  }
+
+  /// A folder browser on [host] that shares its SSH login.
+  Future<SshRemoteSession> browseHost(GatewayInfo host) async {
+    final client = await hosts.client(host);
+    return SshRemoteSession.shared(
+      client,
+      host,
+      reopen: () => hosts.client(host),
+    );
+  }
+
+  Future<AcpTransport> _openTransport(GatewayInfo target) async {
+    if (target.kind != AgentTransportKind.ssh) {
+      return AcpTransportFactory.open(target);
+    }
+    final client = await hosts.client(target);
+    return SshStdioTransport.attach(
+      client: client,
+      target: target,
+      ownsClient: false,
     );
   }
 
@@ -155,8 +204,12 @@ class ConnectionManager extends ChangeNotifier {
     if (existing != null && existing.isConnected) {
       return Future.value(existing);
     }
-    return _opening[key] ??= _openPooled(key, profile, existing)
-        .whenComplete(() => _opening.remove(key));
+    // The callback must not return the removed future: whenComplete would
+    // then wait on itself.
+    return _opening[key] ??=
+        _openPooled(key, profile, existing).whenComplete(() {
+      _opening.remove(key);
+    });
   }
 
   Future<ws.WebSocketService> _openPooled(
@@ -166,6 +219,7 @@ class ConnectionManager extends ChangeNotifier {
   ) async {
     final service = existing ?? ws.WebSocketService();
     service
+      ..transportOpener = _openTransport
       ..autoApprovePermissions = _wsService.autoApprovePermissions
       ..mcpServers = _wsService.mcpServers;
     _pool[key] = service;
@@ -221,46 +275,30 @@ class ConnectionManager extends ChangeNotifier {
     Logger.info('Checking agent statuses...');
 
     try {
+      final sshHosts = <String, GatewayInfo>{};
       for (final gw in _savedGateways) {
-        final key = gw.connectionId;
-        try {
-          final online = await _isReachable(gw);
-          _gatewayStatuses[key] = GatewayStatus(
-            gateway: gw,
-            isOnline: online,
-            version: online ? 'ready' : null,
-            error: online ? null : 'unreachable',
-          );
-        } catch (e) {
-          _gatewayStatuses[key] = GatewayStatus(
-            gateway: gw,
-            isOnline: false,
-            error: e.toString(),
-          );
+        if (gw.kind == AgentTransportKind.ssh) {
+          if (!gw.requiresAuth) sshHosts.putIfAbsent(gw.hostId, () => gw);
+          continue;
         }
+        final online = await _isLocalAgentAvailable(gw);
+        _gatewayStatuses[gw.connectionId] = GatewayStatus(
+          gateway: gw,
+          isOnline: online,
+          version: online ? 'ready' : null,
+          error: online ? null : '找不到本机 agent',
+        );
       }
+      await Future.wait(sshHosts.values.map(hosts.check));
     } finally {
       _isCheckingStatus = false;
       notifyListeners();
     }
   }
 
-  Future<bool> _isReachable(GatewayInfo gw) async {
-    if (gw.kind == AgentTransportKind.local) {
-      try {
-        await CursorAgent.resolve(gw.command);
-        return true;
-      } catch (_) {
-        return false;
-      }
-    }
+  Future<bool> _isLocalAgentAvailable(GatewayInfo gw) async {
     try {
-      final socket = await Socket.connect(
-        gw.host,
-        gw.port,
-        timeout: const Duration(seconds: 3),
-      );
-      socket.destroy();
+      await CursorAgent.resolve(gw.command);
       return true;
     } catch (_) {
       return false;
@@ -276,11 +314,35 @@ class ConnectionManager extends ChangeNotifier {
   Future<void> removeSavedGateway(GatewayInfo gateway) async {
     _savedGateways = await GatewayConfig.removeGateway(gateway);
     _gatewayStatuses.remove(gateway.connectionId);
+    if (gateway.kind == AgentTransportKind.ssh &&
+        !_savedGateways.any((g) => g.hostId == gateway.hostId)) {
+      hosts.forget(gateway);
+    }
     notifyListeners();
   }
 
   GatewayStatus? getGatewayStatus(GatewayInfo gateway) {
+    if (gateway.kind == AgentTransportKind.ssh) {
+      final state = hosts.stateOf(gateway);
+      if (state.status == HostStatus.unknown) return null;
+      return GatewayStatus(
+        gateway: gateway,
+        isOnline: state.isOnline,
+        version: state.isOnline ? 'ready' : null,
+        error: state.error,
+      );
+    }
     return _gatewayStatuses[gateway.connectionId];
+  }
+
+  HostState hostState(GatewayInfo gateway) {
+    if (gateway.kind == AgentTransportKind.ssh) return hosts.stateOf(gateway);
+    final status = _gatewayStatuses[gateway.connectionId];
+    if (status == null) return const HostState(HostStatus.unknown);
+    return HostState(
+      status.isOnline ? HostStatus.online : HostStatus.offline,
+      error: status.error,
+    );
   }
 
   Future<List<ChatSession>> getSavedSessions() async {
@@ -332,19 +394,6 @@ class ConnectionManager extends ChangeNotifier {
       () => _wsService.connectTarget(prepared),
       persist: gateway,
     );
-  }
-
-  Future<void> connectWithSshSession(
-    GatewayInfo gateway,
-    SshRemoteSession session,
-  ) async {
-    await _completeConnect(gateway, () async {
-      final transport = await session.startAgent(gateway);
-      await _wsService.connectWithTransport(
-        transport,
-        workingDirectory: gateway.workingDirectory,
-      );
-    });
   }
 
   Future<void> _completeConnect(
@@ -410,5 +459,12 @@ class ConnectionManager extends ChangeNotifier {
     await GatewayConfig.clear();
     _gateway = null;
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    hosts.removeListener(notifyListeners);
+    hosts.dispose();
+    super.dispose();
   }
 }
