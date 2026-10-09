@@ -295,7 +295,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 20),
 
-          _buildSectionHeader('代理'),
+          const FluentSectionHeader('代理'),
           Card(
             child: Column(
               children: [
