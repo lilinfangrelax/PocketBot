@@ -8,6 +8,7 @@ import 'package:dartssh2/dartssh2.dart';
 import 'package:pocketbot_remote/pocketbot_remote.dart';
 
 import 'package:pocket_bot/models/message.dart';
+import 'package:pocket_bot/services/acp_file_system.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
 import 'package:pocket_bot/services/remote_helper.dart';
 import 'package:pocket_bot/utils/logger.dart';
@@ -33,6 +34,10 @@ abstract class AcpTransport {
 
   /// Release stdout that was held until [resumed] was known.
   void release() {}
+
+  /// Files on the agent's machine. Null means the client must not advertise
+  /// `fs` capabilities, because it cannot reach the agent's disk.
+  AcpFileSystem? get fileSystem => null;
 }
 
 /// Splits stdio ACP traffic into one JSON object per line.
@@ -485,6 +490,9 @@ class LocalStdioTransport implements AcpTransport {
   void release() {}
 
   @override
+  AcpFileSystem? get fileSystem => const LocalAcpFileSystem();
+
+  @override
   void send(String jsonFrame) {
     try {
       _commandPort.send(<String, dynamic>{
@@ -669,7 +677,8 @@ void acpStdioIsolateMain(dynamic raw) {
 }
 
 class SshStdioTransport implements AcpTransport {
-  SshStdioTransport._(this._client, this._session, this._incoming);
+  SshStdioTransport._(this._client, this._session, this._incoming)
+      : fileSystem = SftpAcpFileSystem(_client);
 
   final SSHClient _client;
   final SSHSession _session;
@@ -682,6 +691,9 @@ class SshStdioTransport implements AcpTransport {
   bool _released = false;
   bool _closed = false;
   bool _reportedExit = false;
+
+  @override
+  final AcpFileSystem fileSystem;
 
   static Future<SshStdioTransport> start(GatewayInfo target) async {
     final client = await openSshClient(target);
@@ -876,6 +888,9 @@ class WebSocketAcpTransport implements AcpTransport {
 
   @override
   void release() {}
+
+  @override
+  AcpFileSystem? get fileSystem => null;
 
   @override
   void send(String jsonFrame) {

@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pocket_bot/models/message.dart';
+import 'package:pocket_bot/services/acp_file_system.dart';
 import 'package:pocket_bot/services/acp_transport.dart';
 import 'package:pocket_bot/services/websocket_service.dart';
 
@@ -92,6 +93,10 @@ void main() {
       requests.first['params']['clientCapabilities']['_meta']
           ['parameterizedModelPicker'],
       isTrue,
+    );
+    expect(
+      requests.first['params']['clientCapabilities']['fs'],
+      {'readTextFile': false, 'writeTextFile': false},
     );
 
     service.createNewSession();
@@ -672,6 +677,75 @@ void main() {
     expect(agent.text, '嗯，我在。');
     expect(agent.isStreaming, isFalse);
   });
+  test('routes fs requests to the transport file system', () async {
+    final files = _MemoryFileSystem({'/remote/repo/a.txt': 'one\ntwo\nthree'});
+    final transport = _FakeAcpTransport(fileSystem: files);
+    final service = WebSocketService();
+    addTearDown(() async {
+      await service.disconnect();
+      await transport.close();
+    });
+
+    final initialized =
+        service.connectWithTransport(transport, workingDirectory: '/remote/repo');
+    final init = await transport.waitForMethod('initialize');
+    expect(
+      init['params']['clientCapabilities']['fs'],
+      {'readTextFile': true, 'writeTextFile': true},
+    );
+    transport.respondToLast({
+      'protocolVersion': 1,
+      'agentCapabilities': <String, dynamic>{},
+      'authMethods': <dynamic>[],
+    });
+    await initialized;
+
+    transport.push({
+      'jsonrpc': '2.0',
+      'id': 'read-1',
+      'method': 'fs/read_text_file',
+      'params': {'sessionId': 's', 'path': 'a.txt', 'line': 2, 'limit': 1},
+    });
+    final read = await transport.waitForResponse('read-1');
+    expect(read['result']['content'], 'two');
+
+    transport.push({
+      'jsonrpc': '2.0',
+      'id': 'write-1',
+      'method': 'fs/write_text_file',
+      'params': {'sessionId': 's', 'path': '/remote/repo/b.txt', 'content': 'x'},
+    });
+    await transport.waitForResponse('write-1');
+    expect(files.files['/remote/repo/b.txt'], 'x');
+
+    transport.push({
+      'jsonrpc': '2.0',
+      'id': 'read-2',
+      'method': 'fs/read_text_file',
+      'params': {'sessionId': 's', 'path': '/missing'},
+    });
+    final missing = await transport.waitForResponse('read-2');
+    expect(missing['error']['code'], -32002);
+  });
+
+  test('rejects fs requests when the transport cannot reach files', () async {
+    final transport = _FakeAcpTransport();
+    final service = WebSocketService();
+    addTearDown(() async {
+      await service.disconnect();
+      await transport.close();
+    });
+
+    await _connectFake(service, transport);
+    transport.push({
+      'jsonrpc': '2.0',
+      'id': 'write-1',
+      'method': 'fs/write_text_file',
+      'params': {'sessionId': 's', 'path': '/tmp/x', 'content': 'x'},
+    });
+    final reply = await transport.waitForResponse('write-1');
+    expect(reply['error'], isNotNull);
+  });
 }
 
 Future<void> _connectFake(
@@ -695,6 +769,11 @@ Future<void> _connectFake(
 }
 
 class _FakeAcpTransport implements AcpTransport {
+  _FakeAcpTransport({this.fileSystem});
+
+  @override
+  final AcpFileSystem? fileSystem;
+
   final _incoming = StreamController<dynamic>.broadcast();
   final sent = <Map<String, dynamic>>[];
 
@@ -762,5 +841,27 @@ class _FakeAcpTransport implements AcpTransport {
       await Future<void>.delayed(const Duration(milliseconds: 10));
     }
     throw TimeoutException('Did not send ACP response $id');
+  }
+}
+
+class _MemoryFileSystem implements AcpFileSystem {
+  _MemoryFileSystem(Map<String, String> initial) : files = {...initial};
+
+  final Map<String, String> files;
+
+  @override
+  String resolve(String path, String workingDirectory) =>
+      path.startsWith('/') ? path : '$workingDirectory/$path';
+
+  @override
+  Future<String> readText(String path) async {
+    final value = files[path];
+    if (value == null) throw AcpFileNotFound(path);
+    return value;
+  }
+
+  @override
+  Future<void> writeText(String path, String content) async {
+    files[path] = content;
   }
 }

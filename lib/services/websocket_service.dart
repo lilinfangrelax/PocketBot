@@ -1,14 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
-import 'package:path/path.dart' as p;
 import 'package:pocket_bot/config/session_storage.dart';
 import 'package:pocket_bot/models/attachment.dart';
 import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/models/session_state.dart';
+import 'package:pocket_bot/services/acp_file_system.dart';
 import 'package:pocket_bot/services/acp_transport.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
 import 'package:pocket_bot/services/notification_service.dart';
@@ -318,8 +317,8 @@ class WebSocketService with ChangeNotifier {
           'protocolVersion': 1,
           'clientCapabilities': {
             'fs': {
-              'readTextFile': true,
-              'writeTextFile': true,
+              'readTextFile': transport.fileSystem != null,
+              'writeTextFile': transport.fileSystem != null,
             },
             'terminal': false,
             '_meta': {
@@ -729,13 +728,14 @@ class WebSocketService with ChangeNotifier {
 
   Future<void> _handleReadTextFile(
       dynamic id, Map<String, dynamic> params) async {
+    final fs = _transport?.fileSystem;
+    if (fs == null) {
+      _sendRpcError(id, -32601, 'File access is not available');
+      return;
+    }
     try {
-      final file = File(_resolvePath(params['path'] as String? ?? ''));
-      if (!await file.exists()) {
-        _sendRpcError(id, -32000, 'File not found: ${file.path}');
-        return;
-      }
-      var content = await file.readAsString();
+      final path = fs.resolve(params['path'] as String? ?? '', _workingDirectory);
+      var content = await fs.readText(path);
       final line = params['line'];
       final limit = params['limit'];
       if (line is int && line > 0) {
@@ -751,6 +751,8 @@ class WebSocketService with ChangeNotifier {
         'id': id,
         'result': {'content': content},
       });
+    } on AcpFileNotFound catch (error) {
+      _sendRpcError(id, -32002, error.toString());
     } catch (error) {
       _sendRpcError(id, -32000, 'Failed to read file: $error');
     }
@@ -758,10 +760,14 @@ class WebSocketService with ChangeNotifier {
 
   Future<void> _handleWriteTextFile(
       dynamic id, Map<String, dynamic> params) async {
+    final fs = _transport?.fileSystem;
+    if (fs == null) {
+      _sendRpcError(id, -32601, 'File access is not available');
+      return;
+    }
     try {
-      final file = File(_resolvePath(params['path'] as String? ?? ''));
-      await file.parent.create(recursive: true);
-      await file.writeAsString(params['content'] as String? ?? '');
+      final path = fs.resolve(params['path'] as String? ?? '', _workingDirectory);
+      await fs.writeText(path, params['content'] as String? ?? '');
       _sendJson({
         'jsonrpc': '2.0',
         'id': id,
@@ -770,12 +776,6 @@ class WebSocketService with ChangeNotifier {
     } catch (error) {
       _sendRpcError(id, -32000, 'Failed to write file: $error');
     }
-  }
-
-  String _resolvePath(String path) {
-    if (path.isEmpty) return _workingDirectory;
-    if (p.isAbsolute(path)) return p.normalize(path);
-    return p.normalize(p.join(_workingDirectory, path));
   }
 
   void _sendRpcError(dynamic id, int code, String message) {
