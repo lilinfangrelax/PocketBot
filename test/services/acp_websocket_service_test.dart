@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pocket_bot/models/mcp_server_config.dart';
 import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/services/acp_file_system.dart';
 import 'package:pocket_bot/services/acp_transport.dart';
@@ -933,6 +934,74 @@ void main() {
     expect(call.command, 'patch');
     expect(call.locations, ['/repo/lib/main.dart:3']);
     expect(call.diffs.single.newText, 'a\nc\n');
+  });
+
+  test('passes enabled MCP servers the agent can use to session/new',
+      () async {
+    final transport = _FakeAcpTransport();
+    final service = WebSocketService()
+      ..mcpServers = const [
+        McpServerConfig(
+          id: '1',
+          name: 'files',
+          command: 'npx',
+          args: ['-y', 'server-filesystem'],
+          env: [McpKeyValue('TOKEN', 'x')],
+        ),
+        McpServerConfig(
+          id: '2',
+          name: 'web',
+          transport: McpTransport.http,
+          url: 'https://mcp.example.com',
+          headers: [McpKeyValue('Authorization', 'Bearer t')],
+        ),
+        McpServerConfig(
+          id: '3',
+          name: 'events',
+          transport: McpTransport.sse,
+          url: 'https://sse.example.com',
+        ),
+        McpServerConfig(id: '4', name: 'off', command: 'x', enabled: false),
+      ];
+    addTearDown(() async {
+      await service.disconnect();
+      await transport.close();
+    });
+
+    final initialized = service.connectWithTransport(transport);
+    await transport.waitForMethod('initialize');
+    transport.respondToLast({
+      'protocolVersion': 1,
+      'agentCapabilities': {
+        'mcpCapabilities': {'http': true, 'sse': false},
+      },
+      'authMethods': <dynamic>[],
+    });
+    await initialized;
+
+    final sending = service.sendMessage('Hi');
+    final request = await transport.waitForMethod('session/new');
+    transport.respondToLast({'sessionId': 'session-1'});
+    await sending;
+
+    expect(request['params']['mcpServers'], [
+      {
+        'name': 'files',
+        'command': 'npx',
+        'args': ['-y', 'server-filesystem'],
+        'env': [
+          {'name': 'TOKEN', 'value': 'x'},
+        ],
+      },
+      {
+        'type': 'http',
+        'name': 'web',
+        'url': 'https://mcp.example.com',
+        'headers': [
+          {'name': 'Authorization', 'value': 'Bearer t'},
+        ],
+      },
+    ]);
   });
 }
 

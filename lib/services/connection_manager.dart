@@ -4,7 +4,9 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pocket_bot/config/gateway_config.dart';
+import 'package:pocket_bot/config/mcp_config.dart';
 import 'package:pocket_bot/config/session_storage.dart';
+import 'package:pocket_bot/models/mcp_server_config.dart';
 import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/services/acp_registry.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
@@ -72,6 +74,19 @@ class ConnectionManager extends ChangeNotifier {
     } catch (error) {
       Logger.warning('Could not load ACP preferences: $error');
     }
+    try {
+      _wsService.mcpServers = await McpConfig.load();
+    } catch (error) {
+      Logger.warning('Could not load MCP servers: $error');
+    }
+  }
+
+  List<McpServerConfig> get mcpServers => _wsService.mcpServers;
+
+  Future<void> saveMcpServers(List<McpServerConfig> servers) async {
+    _wsService.mcpServers = servers;
+    notifyListeners();
+    await McpConfig.save(servers);
   }
 
   Future<void> setAutoApprovePermissions(bool value) async {

@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:pocket_bot/config/session_storage.dart';
 import 'package:pocket_bot/models/acp_tool_call.dart';
 import 'package:pocket_bot/models/attachment.dart';
+import 'package:pocket_bot/models/mcp_server_config.dart';
 import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/models/session_state.dart';
 import 'package:pocket_bot/services/acp_file_system.dart';
@@ -251,6 +252,7 @@ class WebSocketService with ChangeNotifier {
   final Map<String, AcpPermissionRequest> _pendingPermissions = {};
   final Map<String, List<AcpPlanEntry>> _plans = {};
   final Map<String, AcpToolCall> _toolCalls = {};
+  List<McpServerConfig> _mcpServers = const [];
   bool _autoApprovePermissions = false;
   final _clientRequestController =
       StreamController<Map<String, dynamic>>.broadcast();
@@ -337,6 +339,29 @@ class WebSocketService with ChangeNotifier {
       toolCallId != null &&
       _pendingPermissions.values
           .any((request) => request.toolCallId == toolCallId);
+
+  List<McpServerConfig> get mcpServers => List.unmodifiable(_mcpServers);
+
+  /// Applies to sessions created or loaded after the change.
+  set mcpServers(List<McpServerConfig> servers) {
+    _mcpServers = List.of(servers);
+    notifyListeners();
+  }
+
+  List<Map<String, dynamic>> _mcpServersForAgent() {
+    final caps = _asMap(_agentCapabilities['mcpCapabilities']);
+    return _mcpServers.where((server) {
+      if (!server.enabled || !server.isValid) return false;
+      switch (server.transport) {
+        case McpTransport.stdio:
+          return true;
+        case McpTransport.http:
+          return caps['http'] == true;
+        case McpTransport.sse:
+          return caps['sse'] == true;
+      }
+    }).map((server) => server.toAcp()).toList();
+  }
 
   List<AcpPlanEntry> planFor(String? sessionKey) =>
       List.unmodifiable(_plans[sessionKey] ?? const <AcpPlanEntry>[]);
@@ -1037,7 +1062,7 @@ class WebSocketService with ChangeNotifier {
   Future<String> _createRemoteSession() async {
     final result = await _request('session/new', {
       'cwd': _workingDirectory,
-      'mcpServers': <dynamic>[],
+      'mcpServers': _mcpServersForAgent(),
     });
     final id = result['sessionId'] as String?;
     if (id == null || id.isEmpty) {
@@ -1265,14 +1290,14 @@ class WebSocketService with ChangeNotifier {
       final result = await _request('session/resume', {
         'sessionId': sessionKey,
         'cwd': _workingDirectory,
-        'mcpServers': <dynamic>[],
+        'mcpServers': _mcpServersForAgent(),
       });
       _applySessionMeta(result);
     } else if (_agentCapabilities['loadSession'] == true) {
       final result = await _request('session/load', {
         'sessionId': sessionKey,
         'cwd': _workingDirectory,
-        'mcpServers': <dynamic>[],
+        'mcpServers': _mcpServersForAgent(),
       });
       _applySessionMeta(result);
     } else {

@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import 'package:pocket_bot/config/session_storage.dart';
 import 'package:pocket_bot/config/user_config.dart';
 import 'package:pocket_bot/main.dart';
+import 'package:pocket_bot/screens/mcp_servers_screen.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/utils/version_utils.dart';
@@ -264,21 +265,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const Divider(),
                 ListTile(
-                  leading: const Icon(Icons.verified_user_outlined),
-                  title: const Text('自动允许代理操作'),
-                  subtitle: const Text('关闭时，运行命令、改文件等操作需要你逐个确认'),
-                  trailing: fluent.ToggleSwitch(
-                    checked: context
-                        .watch<ConnectionManager>()
-                        .wsService
-                        .autoApprovePermissions,
-                    onChanged: (value) => context
-                        .read<ConnectionManager>()
-                        .setAutoApprovePermissions(value),
-                  ),
-                ),
-                const Divider(),
-                ListTile(
                   leading: const Icon(Icons.dark_mode),
                   title: const Text('主题'),
                   subtitle: Text(_getThemeName(currentMode)),
@@ -302,6 +288,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   subtitle: const Text('删除本机保存的聊天记录'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _clearAllSessions(context),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          _buildSectionHeader('代理'),
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.verified_user_outlined),
+                  title: const Text('自动允许代理操作'),
+                  subtitle: const Text('关闭时，运行命令、改文件等操作需要你逐个确认'),
+                  trailing: fluent.ToggleSwitch(
+                    checked: context
+                        .watch<ConnectionManager>()
+                        .wsService
+                        .autoApprovePermissions,
+                    onChanged: (value) => context
+                        .read<ConnectionManager>()
+                        .setAutoApprovePermissions(value),
+                  ),
+                ),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.extension_outlined),
+                  title: const Text('MCP 服务器'),
+                  subtitle: Text(
+                    '${context.watch<ConnectionManager>().mcpServers.where((s) => s.enabled).length} 个已启用',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const McpServersScreen(),
+                    ),
+                  ),
                 ),
               ],
             ),
