@@ -227,7 +227,7 @@ bool isRemoteRoot(String path) {
 
 /// Turns a remote agent exit into a short message the connection screen can show.
 String formatRemoteAgentExit({int? exitCode, String stderr = ''}) {
-  final line = _usefulRemoteStderr(stderr);
+  final line = _usefulRemoteStderr(cleanRemoteStderr(stderr));
   final lower = line.toLowerCase();
   if (lower.contains('not recognized') ||
       lower.contains('cannot find') && lower.contains('agent') ||
@@ -714,10 +714,19 @@ void acpStdioIsolateMain(dynamic raw) {
 }
 
 class SshStdioTransport implements AcpTransport {
-  SshStdioTransport._(this._client, this._session, this._incoming)
-      : fileSystem = SftpAcpFileSystem(_client);
+  SshStdioTransport._(
+    this._client,
+    this._session,
+    this._incoming, {
+    required bool ownsClient,
+  })  : _ownsClient = ownsClient,
+        fileSystem = SftpAcpFileSystem(_client);
 
   final SSHClient _client;
+
+  /// False when the client is shared through [SshHostPool]; closing the agent
+  /// then leaves the SSH login up for other agents and folder browsing.
+  final bool _ownsClient;
   final SSHSession _session;
   final StreamController<dynamic> _incoming;
   final NdjsonBuffer _buffer = NdjsonBuffer();
@@ -745,19 +754,24 @@ class SshStdioTransport implements AcpTransport {
   static Future<SshStdioTransport> attach({
     required SSHClient client,
     required GatewayInfo target,
+    bool ownsClient = true,
   }) async {
-    final remoteCommand = await remoteHelperCommand(
-      client: client,
-      target: target,
-    );
-    Logger.info(
-      '[ACP] SSH ${target.username}@${target.host}:${target.port} → $remoteCommand',
-    );
-
     try {
+      final remoteCommand = await remoteHelperCommand(
+        client: client,
+        target: target,
+      );
+      Logger.info(
+        '[ACP] SSH ${target.username}@${target.host}:${target.port} → $remoteCommand',
+      );
       final session = await client.execute(remoteCommand);
       final incoming = StreamController<dynamic>.broadcast();
-      final transport = SshStdioTransport._(client, session, incoming);
+      final transport = SshStdioTransport._(
+        client,
+        session,
+        incoming,
+        ownsClient: ownsClient,
+      );
 
       session.stdout.cast<List<int>>().transform(utf8.decoder).listen(
         transport._onStdout,
@@ -860,9 +874,11 @@ class SshStdioTransport implements AcpTransport {
     try {
       _session.close();
     } catch (_) {}
-    try {
-      _client.close();
-    } catch (_) {}
+    if (_ownsClient) {
+      try {
+        _client.close();
+      } catch (_) {}
+    }
     if (!_incoming.isClosed) await _incoming.close();
   }
 }

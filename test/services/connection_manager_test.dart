@@ -1,8 +1,31 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('connectProfile reports a failed launch instead of hanging', () async {
+    final manager = ConnectionManager();
+    addTearDown(manager.dispose);
+    final profile = GatewayInfo.local(
+      workingDirectory: '/definitely/missing/pocketbot-dir',
+      command: 'agent',
+    ).copyWith(instanceTag: ConnectionManager.contactInstanceTag('c1'));
+
+    await expectLater(
+      manager.connectProfile(profile).timeout(const Duration(seconds: 5)),
+      throwsA(isNot(isA<TimeoutException>())),
+    );
+    // A second attempt starts over rather than reusing the failed one.
+    await expectLater(
+      manager.connectProfile(profile).timeout(const Duration(seconds: 5)),
+      throwsA(isNot(isA<TimeoutException>())),
+    );
+  });
+
   group('ConnectionManager - Network Utilities', () {
     group('_getSubnet', () {
       test('should correctly extract subnet from IP 192.168.1.100', () {

@@ -85,10 +85,13 @@ String _psSingleQuote(String value) => "'${value.replaceAll("'", "''")}'";
 String _windowsProbeScript(String version) {
   final exe = _psSingleQuote('.pocketbot\\pocketbot-remote-$version.exe');
   final expected = _psSingleQuote(version);
-  return "\$p = Join-Path \$env:USERPROFILE $exe; "
+  // A half-downloaded exe must read as MISSING, not abort the script.
+  return "\$ProgressPreference = 'SilentlyContinue'; "
+      "\$p = Join-Path \$env:USERPROFILE $exe; "
       "\$ver = ''; "
       'if (Test-Path -LiteralPath \$p) { '
-      '\$ver = (& \$p version | Out-String).Trim() }; '
+      'try { \$ver = (& \$p version 2>\$null | Out-String).Trim() } '
+      "catch { \$ver = '' } }; "
       "if (\$ver -eq $expected) { Write-Output ('READY ' + \$p) } "
       "else { Write-Output 'MISSING' }";
 }
@@ -100,10 +103,16 @@ String _windowsDownloadScript({
   final dir = _psSingleQuote('.pocketbot');
   final exe = _psSingleQuote('pocketbot-remote-$version.exe');
   final uri = _psSingleQuote(url);
-  return "\$d = Join-Path \$env:USERPROFILE $dir; "
+  // Progress output turns stderr into CLIXML and makes Windows PowerShell 5
+  // download very slowly. The .partial file keeps an interrupted download
+  // from looking installed.
+  return "\$ProgressPreference = 'SilentlyContinue'; "
+      "\$d = Join-Path \$env:USERPROFILE $dir; "
       'New-Item -ItemType Directory -Force -Path \$d | Out-Null; '
       "\$p = Join-Path \$d $exe; "
-      "Invoke-WebRequest -Uri $uri -OutFile \$p";
+      "\$t = \$p + '.partial'; "
+      "Invoke-WebRequest -UseBasicParsing -Uri $uri -OutFile \$t; "
+      'Move-Item -Force -LiteralPath \$t -Destination \$p';
 }
 
 String helperProbeCommand(RemotePlatform platform, String version) {
@@ -274,12 +283,52 @@ Future<String> execRemote(SSHClient client, String command) async {
   ]);
   await session.done;
   final out = stdout.toString();
+  if (Logger.isVerbose) {
+    Logger.debug('[remote] exec exit=${session.exitCode} '
+        'cmd=${_commandForLog(command)}\n'
+        'stdout: ${out.trim()}\n'
+        'stderr: ${cleanRemoteStderr(stderr.toString()).trim()}');
+  }
   if ((session.exitCode ?? 1) != 0 && out.trim().isEmpty) {
-    final err = stderr.toString().trim();
-    throw Exception(err.isEmpty ? '远程命令失败' : err);
+    final err = cleanRemoteStderr(stderr.toString()).trim();
+    throw Exception(
+      err.isEmpty ? '远程命令失败（退出码 ${session.exitCode ?? '未知'}）' : err,
+    );
   }
   return out;
 }
+
+String _commandForLog(String command) {
+  final oneLine = command.replaceAll(RegExp(r'\s+'), ' ');
+  return oneLine.length <= 300 ? oneLine : '${oneLine.substring(0, 300)}…';
+}
+
+/// Windows PowerShell writes progress and errors to a redirected stderr as
+/// CLIXML (`#< CLIXML<Objs ...>`). Keeps the error text, drops the rest.
+String cleanRemoteStderr(String stderr) {
+  if (!stderr.contains('#< CLIXML')) return stderr;
+  final errors = RegExp(r'<S S="Error">(.*?)</S>', dotAll: true)
+      .allMatches(stderr)
+      .map((match) => _decodeClixml(match.group(1)!))
+      .join()
+      .trim();
+  final rest = stderr
+      .replaceAll(RegExp(r'<Objs\b.*?(</Objs>|$)', dotAll: true), '')
+      .replaceAll('#< CLIXML', '')
+      .trim();
+  return [errors, rest].where((part) => part.isNotEmpty).join('\n');
+}
+
+String _decodeClixml(String text) => text
+    .replaceAllMapped(
+      RegExp(r'_x([0-9A-Fa-f]{4})_'),
+      (match) => String.fromCharCode(int.parse(match.group(1)!, radix: 16)),
+    )
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&apos;', "'")
+    .replaceAll('&amp;', '&');
 
 Future<void> uploadRemoteFile(
   SSHClient client,
@@ -300,7 +349,27 @@ Future<void> uploadRemoteFile(
   }
 }
 
+final _installs = Expando<Map<String, Future<String>>>();
+
+/// Agents sharing one SSH login install the helper once; parallel downloads
+/// to the same file would corrupt it.
 Future<String> installHelperOnClient({
+  required SSHClient client,
+  required RemotePlatform platform,
+  required String version,
+}) {
+  final pending = _installs[client] ??= {};
+  final key = '${platform.label}|$version';
+  return pending[key] ??= _installHelper(
+    client: client,
+    platform: platform,
+    version: version,
+  ).whenComplete(() {
+    pending.remove(key);
+  });
+}
+
+Future<String> _installHelper({
   required SSHClient client,
   required RemotePlatform platform,
   required String version,
@@ -335,7 +404,9 @@ Future<String> remoteHelperCommand({
     windows: platform.isWindows,
     helperPath: helperPath,
     sessionId: remoteAgentSessionId(
-      connectionId: prepared.connectionId,
+      connectionId: prepared.instanceTag.isEmpty
+          ? prepared.connectionId
+          : '${prepared.connectionId}|${prepared.instanceTag}',
       agentId: prepared.agentId,
       workingDirectory: cwd,
     ),

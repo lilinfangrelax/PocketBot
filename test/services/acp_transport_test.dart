@@ -161,6 +161,18 @@ void main() {
       );
     });
 
+    test('reads the error out of PowerShell CLIXML', () {
+      expect(
+        formatRemoteAgentExit(
+          exitCode: 1,
+          stderr: '#< CLIXML\r\n<Objs Version="1.1.0.1">'
+              '<S S="Error">Error: codex login required_x000D__x000A_</S>'
+              '</Objs>',
+        ),
+        'AGENT_EXIT:Error: codex login required',
+      );
+    });
+
     test('says the process exited when stderr is empty', () {
       expect(
         formatRemoteAgentExit(exitCode: 1),

@@ -1,11 +1,16 @@
 import 'package:fluent_ui/fluent_ui.dart' as fluent;
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:pocket_bot/models/group_chat.dart';
+import 'package:pocket_bot/models/group_workspace.dart';
+import 'package:pocket_bot/models/message.dart' show AgentTransportKind;
+import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/services/group_chat_service.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
 import 'package:pocket_bot/widgets/fluent_page.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/widgets/chat_bubble_widget.dart';
+import 'package:pocket_bot/widgets/workspace_picker.dart';
 
 /// 群聊聊天页面 - 使用共享组件
 class GroupChatScreen extends StatefulWidget {
@@ -23,6 +28,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   final ScrollController _scrollController = ScrollController();
 
   GroupChat? _group;
+  GroupWorkspace? _workspace;
   List<GroupMessage> _messages = [];
   bool _isLoading = true;
   bool _isSending = false;
@@ -55,6 +61,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         (g) => g.id == widget.groupId,
         orElse: () => throw Exception('群聊不存在'),
       );
+
+      _workspace = await _groupChatService.workspaceFor(widget.groupId);
+      _checkWorkspaceHost();
 
       // 获取群消息
       _messages = await _groupChatService.getGroupMessages(widget.groupId);
@@ -111,6 +120,79 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         setState(() => _isSending = false);
       }
     }
+  }
+
+  void _checkWorkspaceHost() {
+    final workspace = _workspace;
+    if (!mounted || workspace == null || !workspace.isSet) return;
+    final manager = context.read<ConnectionManager>();
+    final host = manager.hostById(workspace.hostId);
+    if (host == null || host.kind != AgentTransportKind.ssh) return;
+    if (host.requiresAuth || manager.hosts.isConnected(host)) return;
+    manager.hosts.check(host);
+  }
+
+  Future<void> _changeWorkspace() async {
+    final choice = await pickWorkspace(
+      context,
+      groupId: widget.groupId,
+      current: _workspace,
+    );
+    if (choice == null || !mounted) return;
+    try {
+      final workspace = choice.workspace;
+      if (workspace == null) {
+        await _groupChatService.workspaces.clear(widget.groupId);
+      } else {
+        await _groupChatService.workspaces.save(workspace);
+      }
+      if (mounted) setState(() => _workspace = workspace);
+      _checkWorkspaceHost();
+    } catch (e) {
+      if (mounted) showAppNotice(context, '保存工作目录失败: $e');
+    }
+  }
+
+  Widget _buildWorkspaceBar() {
+    final colors = FluentColors.of(context);
+    final manager = context.watch<ConnectionManager>();
+    final workspace = _workspace;
+    final isSet = workspace != null && workspace.isSet;
+    final host = isSet ? manager.hostById(workspace.hostId) : null;
+    return Material(
+      color: colors.chrome,
+      child: InkWell(
+        onTap: _changeWorkspace,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              Icon(Icons.folder_outlined, size: 16, color: colors.textSecondary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  isSet
+                      ? workspaceLabel(manager, workspace)
+                      : '未设置群聊目录，成员在各自的目录工作',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12, color: colors.textSecondary),
+                ),
+              ),
+              if (host != null) ...[
+                const SizedBox(width: 8),
+                HostStatusDot(state: manager.hostState(host)),
+              ],
+              const SizedBox(width: 8),
+              Text(
+                isSet ? '更换' : '设置',
+                style: TextStyle(fontSize: 12, color: colors.accent),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _dispatchToAgents(GroupMessage message) async {
@@ -182,6 +264,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           ? const Center(child: fluent.ProgressRing())
           : Column(
               children: [
+                _buildWorkspaceBar(),
                 // 消息列表
                 Expanded(
                   child: Container(

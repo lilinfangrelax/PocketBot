@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:pocket_bot/models/contact.dart';
+import 'package:pocket_bot/models/group_workspace.dart';
+import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/services/contact_service.dart';
 import 'package:pocket_bot/services/group_chat_service.dart';
+import 'package:pocket_bot/widgets/workspace_picker.dart';
 
 /// 群组成员模型
 class GroupMember {
@@ -41,6 +45,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   final GroupChatService _groupChatService = GroupChatService();
   List<Contact> _availableContacts = [];
   List<GroupMember> _selectedMembers = [];
+  GroupWorkspace? _workspace;
   bool _isLoading = true;
   bool _isCreating = false;
 
@@ -105,7 +110,15 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       final memberIds = _selectedMembers.map((m) => m.id).toList();
 
       // 调用服务创建群聊
-      await _groupChatService.createGroup(groupName, memberIds);
+      final group = await _groupChatService.createGroup(groupName, memberIds);
+      final workspace = _workspace;
+      if (workspace != null) {
+        await _groupChatService.workspaces.save(GroupWorkspace(
+          groupId: group.id,
+          hostId: workspace.hostId,
+          workingDirectory: workspace.workingDirectory,
+        ));
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -124,6 +137,33 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
         setState(() => _isCreating = false);
       }
     }
+  }
+
+  Future<void> _pickWorkspace() async {
+    final choice = await pickWorkspace(
+      context,
+      groupId: '',
+      current: _workspace,
+    );
+    if (choice == null || !mounted) return;
+    setState(() => _workspace = choice.workspace);
+  }
+
+  Widget _buildWorkspaceTile() {
+    final workspace = _workspace;
+    return ListTile(
+      leading: const Icon(Icons.folder_outlined),
+      title: const Text('群聊工作目录'),
+      subtitle: Text(
+        workspace == null
+            ? '可选。设置后所有 AI 成员都在这个目录里工作'
+            : workspaceLabel(context.read<ConnectionManager>(), workspace),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: _pickWorkspace,
+    );
   }
 
   @override
@@ -163,6 +203,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                     ),
                   ),
                 ),
+                _buildWorkspaceTile(),
                 // 已选择成员
                 if (_selectedMembers.isNotEmpty)
                   Container(
