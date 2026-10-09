@@ -1083,6 +1083,24 @@ void main() {
     expect(await loading, 'saved');
   });
 
+  test('OpenSSH drive paths reach the agent as Windows paths', () async {
+    final transport = _FakeAcpTransport();
+    final service = WebSocketService();
+    addTearDown(() async {
+      await service.disconnect();
+      await transport.close();
+    });
+    await _connectFake(service, transport);
+
+    final creating =
+        service.createGatewaySession('Repo', cwd: '/c:/Users/lilin/repo');
+    final request = await transport.waitForMethod('session/new');
+    expect(request['params']['cwd'], r'C:\Users\lilin\repo');
+    transport.respondToLast({'sessionId': 's-win'});
+    await creating;
+    expect(service.workingDirectoryFor('s-win'), r'C:\Users\lilin\repo');
+  });
+
   test('file reads resolve against the session folder', () async {
     final fs = _MemoryFileSystem({'/srv/repo/a.txt': 'repo file'});
     final transport = _FakeAcpTransport(fileSystem: fs);

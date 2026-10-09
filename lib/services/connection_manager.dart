@@ -168,6 +168,18 @@ class ConnectionManager extends ChangeNotifier {
     );
   }
 
+  /// ACP wants an absolute `cwd`, so `.` becomes the remote home folder.
+  Future<String> _absoluteRemoteDirectory(GatewayInfo host) async {
+    final cwd = host.workingDirectory.trim();
+    if (cwd.isNotEmpty && cwd != '.') return cwd;
+    final session = await browseHost(host);
+    try {
+      return await session.resolveStartPath('');
+    } finally {
+      await session.close();
+    }
+  }
+
   Future<AcpTransport> _openTransport(GatewayInfo target) async {
     if (target.kind != AgentTransportKind.ssh) {
       return AcpTransportFactory.open(target);
@@ -229,6 +241,11 @@ class ConnectionManager extends ChangeNotifier {
       if (profile.kind == AgentTransportKind.local &&
           profile.agentId.isNotEmpty) {
         prepared = await prepareGatewayLaunch(profile, localRemotePlatform());
+      }
+      if (profile.kind == AgentTransportKind.ssh) {
+        prepared = prepared.copyWith(
+          workingDirectory: await _absoluteRemoteDirectory(profile),
+        );
       }
       await service.connectTarget(prepared);
       Logger.info('Pooled connection ready: ${profile.displayLabel}');

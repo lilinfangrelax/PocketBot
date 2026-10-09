@@ -403,7 +403,7 @@ class WebSocketService with ChangeNotifier {
         ? CursorAgent.resolveWorkingDirectory(target.workingDirectory)
         : (target.workingDirectory.trim().isEmpty
             ? '.'
-            : target.workingDirectory);
+            : opensshPathToWindows(target.workingDirectory.trim()));
     final open = transportOpener ?? AcpTransportFactory.open;
     await _attachTransport(
       await open(target),
@@ -1094,8 +1094,9 @@ class WebSocketService with ChangeNotifier {
   }
 
   Future<String> _createRemoteSession({String? cwd}) async {
-    final folder =
-        cwd == null || cwd.trim().isEmpty ? _workingDirectory : cwd.trim();
+    final folder = cwd == null || cwd.trim().isEmpty
+        ? _workingDirectory
+        : opensshPathToWindows(cwd.trim());
     final result = await _request('session/new', {
       'cwd': folder,
       'mcpServers': _mcpServersForAgent(),
@@ -1299,7 +1300,7 @@ class WebSocketService with ChangeNotifier {
 
   Future<String> _ensureRemoteSession(String sessionKey, {String? cwd}) async {
     if (cwd != null && cwd.trim().isNotEmpty) {
-      _sessionCwd[sessionKey] = cwd.trim();
+      _sessionCwd[sessionKey] = opensshPathToWindows(cwd.trim());
     }
     if (_attachedSessions.contains(sessionKey)) return sessionKey;
 

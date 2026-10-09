@@ -227,7 +227,7 @@ bool isRemoteRoot(String path) {
 
 /// Turns a remote agent exit into a short message the connection screen can show.
 String formatRemoteAgentExit({int? exitCode, String stderr = ''}) {
-  final line = _usefulRemoteStderr(stderr);
+  final line = _usefulRemoteStderr(cleanRemoteStderr(stderr));
   final lower = line.toLowerCase();
   if (lower.contains('not recognized') ||
       lower.contains('cannot find') && lower.contains('agent') ||
@@ -756,15 +756,14 @@ class SshStdioTransport implements AcpTransport {
     required GatewayInfo target,
     bool ownsClient = true,
   }) async {
-    final remoteCommand = await remoteHelperCommand(
-      client: client,
-      target: target,
-    );
-    Logger.info(
-      '[ACP] SSH ${target.username}@${target.host}:${target.port} → $remoteCommand',
-    );
-
     try {
+      final remoteCommand = await remoteHelperCommand(
+        client: client,
+        target: target,
+      );
+      Logger.info(
+        '[ACP] SSH ${target.username}@${target.host}:${target.port} → $remoteCommand',
+      );
       final session = await client.execute(remoteCommand);
       final incoming = StreamController<dynamic>.broadcast();
       final transport = SshStdioTransport._(
