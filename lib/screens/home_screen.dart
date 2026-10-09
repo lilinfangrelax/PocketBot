@@ -212,7 +212,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         const SizedBox(height: 16),
-        _buildGatewayList(manager),
+        _buildGatewayList(),
       ],
     );
   }
@@ -230,7 +230,7 @@ class _HomeScreenState extends State<HomeScreen> {
           showProgress: true,
         ),
         const SizedBox(height: 16),
-        _buildGatewayList(manager),
+        _buildGatewayList(),
       ],
     );
   }
@@ -270,11 +270,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         const SizedBox(height: 16),
+        _buildGatewayList(),
         _buildAgentPicker(),
         const SizedBox(height: 16),
         _buildLaunchLocal(manager),
         const SizedBox(height: 16),
-        _buildGatewayList(manager),
         _buildSshConnection(manager),
       ],
     );
@@ -291,11 +291,11 @@ class _HomeScreenState extends State<HomeScreen> {
           subText: '从 ACP Registry 选择代理，本机或 SSH 启动',
         ),
         const SizedBox(height: 16),
+        _buildGatewayList(),
         _buildAgentPicker(),
         const SizedBox(height: 16),
         _buildLaunchLocal(manager),
         const SizedBox(height: 16),
-        _buildGatewayList(manager),
         _buildSshConnection(manager),
       ],
     );
@@ -488,7 +488,15 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildGatewayList(ConnectionManager manager) {
+  /// Watches the manager itself: the page body only rebuilds on connection
+  /// state, but saved hosts and their online status change independently.
+  Widget _buildGatewayList() {
+    return Consumer<ConnectionManager>(
+      builder: (context, manager, _) => _buildGatewayColumn(manager),
+    );
+  }
+
+  Widget _buildGatewayColumn(ConnectionManager manager) {
     final saved = manager.savedGateways;
     final allGateways = <GatewayInfo>[];
 
@@ -510,7 +518,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const FluentSectionHeader('已保存的连接'),
+        FluentSectionHeader(_gatewayListTitle(manager, allGateways)),
         ...allGateways.map((gw) {
           final isConnected = manager.gateway != null &&
               manager.gateway!.connectionId == gw.connectionId;
@@ -535,6 +543,23 @@ class _HomeScreenState extends State<HomeScreen> {
         const SizedBox(height: 8),
       ],
     );
+  }
+
+  String _gatewayListTitle(
+    ConnectionManager manager,
+    List<GatewayInfo> gateways,
+  ) {
+    final ssh = gateways
+        .where((gw) => gw.kind == AgentTransportKind.ssh)
+        .map((gw) => gw.hostId)
+        .toSet();
+    if (ssh.isEmpty) return '已保存的连接';
+    final online = gateways
+        .where((gw) =>
+            gw.kind == AgentTransportKind.ssh && manager.hostState(gw).isOnline)
+        .map((gw) => gw.hostId)
+        .toSet();
+    return '已保存的连接 · SSH 在线 ${online.length}/${ssh.length}';
   }
 
   Widget _buildSshConnection(ConnectionManager manager) {
