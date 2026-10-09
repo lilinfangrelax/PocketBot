@@ -128,6 +128,7 @@ class GatewayInfo {
   final bool secure;
   final String username;
   final String privateKey;
+  final String keyPassphrase;
   final String command;
   final List<String> args;
   final String agentId;
@@ -153,6 +154,7 @@ class GatewayInfo {
     this.secure = false,
     this.username = '',
     this.privateKey = '',
+    this.keyPassphrase = '',
     this.command = 'agent',
     this.args = const ['acp'],
     this.agentId = '',
@@ -192,6 +194,7 @@ class GatewayInfo {
     required String username,
     String password = '',
     String privateKey = '',
+    String keyPassphrase = '',
     String name = 'SSH Agent',
     String workingDirectory = '.',
     String command = 'agent',
@@ -206,6 +209,7 @@ class GatewayInfo {
       username: username,
       token: password,
       privateKey: privateKey,
+      keyPassphrase: keyPassphrase,
       name: name,
       workingDirectory: workingDirectory,
       command: command,
@@ -266,6 +270,7 @@ class GatewayInfo {
       secure: json['secure'] ?? false,
       username: json['username'] ?? '',
       privateKey: json['privateKey'] ?? '',
+      keyPassphrase: json['keyPassphrase'] as String? ?? '',
       command: json['command'] ?? 'agent',
       args: rawArgs is List
           ? rawArgs.map((item) => item.toString()).toList()
@@ -303,6 +308,7 @@ class GatewayInfo {
       'secure': secure,
       'username': username,
       'privateKey': privateKey,
+      'keyPassphrase': keyPassphrase,
       'command': command,
       'args': args,
       'agentId': agentId,
@@ -322,6 +328,7 @@ class GatewayInfo {
     bool? secure,
     String? username,
     String? privateKey,
+    String? keyPassphrase,
     String? command,
     List<String>? args,
     String? agentId,
@@ -345,6 +352,7 @@ class GatewayInfo {
       secure: secure ?? this.secure,
       username: username ?? this.username,
       privateKey: privateKey ?? this.privateKey,
+      keyPassphrase: keyPassphrase ?? this.keyPassphrase,
       command: command ?? this.command,
       args: args ?? this.args,
       agentId: agentId ?? this.agentId,

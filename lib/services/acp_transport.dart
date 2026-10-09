@@ -11,6 +11,7 @@ import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/services/acp_file_system.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
 import 'package:pocket_bot/services/remote_helper.dart';
+import 'package:pocket_bot/services/ssh_host_keys.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -327,6 +328,11 @@ Future<SSHClient> openSshClient(GatewayInfo target) async {
     '[ACP] SSH ${target.username}@${target.host}:${target.port}',
   );
 
+  final identities = loadSshIdentities(
+    target.privateKey,
+    passphrase: target.keyPassphrase,
+  );
+
   SSHClient? client;
   try {
     final socket = await SSHSocket.connect(
@@ -337,16 +343,26 @@ Future<SSHClient> openSshClient(GatewayInfo target) async {
     client = SSHClient(
       socket,
       username: target.username,
-      identities: target.privateKey.trim().isEmpty
-          ? null
-          : SSHKeyPair.fromPem(target.privateKey),
+      identities: identities,
       onPasswordRequest: target.token.isEmpty ? null : () => target.token,
+      onVerifyHostKey: (type, fingerprint) => SshHostKeys.verify(
+        host: target.host,
+        port: target.port,
+        keyType: type,
+        fingerprint: utf8.decode(fingerprint),
+      ),
     );
     await client.authenticated.timeout(const Duration(seconds: 20));
     return client;
   } catch (error) {
     client?.close();
     final text = error.toString().toLowerCase();
+    if (error is SSHHostkeyError || text.contains('hostkey')) {
+      throw Exception(
+        'HOST_KEY_REJECTED:${target.host} 的主机密钥未被信任。'
+        '如果服务器确实重装过，请在连接设置里清除已记住的主机密钥后重试。',
+      );
+    }
     if (text.contains('auth') ||
         text.contains('password') ||
         text.contains('permission denied') ||
@@ -362,6 +378,27 @@ Future<SSHClient> openSshClient(GatewayInfo target) async {
       );
     }
     throw Exception('CONNECTION_FAILED:SSH 连接失败: $error');
+  }
+}
+
+/// Parses a PEM private key. Encrypted keys need [passphrase].
+List<SSHKeyPair>? loadSshIdentities(String pem, {String passphrase = ''}) {
+  final text = pem.trim();
+  if (text.isEmpty) return null;
+  bool encrypted;
+  try {
+    encrypted = SSHKeyPair.isEncryptedPem(text);
+  } catch (error) {
+    throw Exception('AUTH_FAILED:无法识别私钥格式: $error');
+  }
+  if (encrypted && passphrase.isEmpty) {
+    throw Exception('AUTH_FAILED:私钥已加密，请填写私钥密码');
+  }
+  try {
+    return SSHKeyPair.fromPem(text, encrypted ? passphrase : null);
+  } catch (error) {
+    if (encrypted) throw Exception('AUTH_FAILED:私钥密码不正确');
+    throw Exception('AUTH_FAILED:无法读取私钥: $error');
   }
 }
 

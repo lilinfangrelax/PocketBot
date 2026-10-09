@@ -8,10 +8,12 @@ import 'package:pocket_bot/screens/main_screen.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/services/github_update_service.dart';
 import 'package:pocket_bot/services/notification_service.dart';
+import 'package:pocket_bot/services/ssh_host_keys.dart';
 import 'package:pocket_bot/services/websocket_service.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/utils/version_utils.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
+import 'package:pocket_bot/widgets/host_key_dialog.dart';
 import 'package:pocket_bot/widgets/update_settings_card.dart';
 
 /// User config provider for avatar changes
@@ -36,6 +38,7 @@ Future<void> main() async {
 
   await AppVersion.init();
   await UpdateConfig.load();
+  SshHostKeys.prompt = hostKeyPromptFor(appNavigatorKey);
 
   _initNotifications();
   _scheduleUpdateCheck();

@@ -13,6 +13,7 @@ import 'package:pocket_bot/screens/settings_screen.dart';
 import 'package:pocket_bot/services/acp_registry.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
+import 'package:pocket_bot/services/ssh_host_keys.dart';
 import 'package:pocket_bot/services/ssh_remote_session.dart';
 import 'package:pocket_bot/services/websocket_service.dart' as ws;
 import 'package:pocket_bot/theme/fluent_theme.dart';
@@ -35,6 +36,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _tokenController = TextEditingController();
   final TextEditingController _privateKeyController = TextEditingController();
+  final TextEditingController _passphraseController = TextEditingController();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _workingDirectoryController =
       TextEditingController();
@@ -44,6 +46,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _manualUsername = '';
   String _manualToken = '';
   String _manualPrivateKey = '';
+  String _manualPassphrase = '';
   String _manualName = '';
   String _sshWorkingDirectory = '.';
   String _agentId = 'cursor';
@@ -117,6 +120,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _usernameController.dispose();
     _tokenController.dispose();
     _privateKeyController.dispose();
+    _passphraseController.dispose();
     _nameController.dispose();
     _workingDirectoryController.dispose();
     super.dispose();
@@ -363,8 +367,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  String _simplifyError(String? error) {
-    if (error == null) return '请检查配置后重试';
+  String _simplifyError(String? raw) {
+    if (raw == null) return '请检查配置后重试';
+    final error = raw.replaceFirst(RegExp(r'^(Exception: )+'), '');
 
     if (error.contains(':')) {
       final parts = error.split(':');
@@ -402,6 +407,8 @@ class _HomeScreenState extends State<HomeScreen> {
           return errorMessage.isEmpty ? '这个代理不支持当前系统' : errorMessage;
         case 'CONNECTION_FAILED':
           return errorMessage.isEmpty ? '连接失败' : errorMessage;
+        case 'HOST_KEY_REJECTED':
+          return errorMessage.isEmpty ? '主机密钥未被信任' : errorMessage;
         default:
           break;
       }
@@ -617,6 +624,16 @@ class _HomeScreenState extends State<HomeScreen> {
               maxLines: 4,
               onChanged: (value) => _manualPrivateKey = value,
             ),
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: _passphraseController,
+              decoration: const InputDecoration(
+                labelText: '私钥密码（私钥加密时填写）',
+                isDense: true,
+              ),
+              obscureText: true,
+              onChanged: (value) => _manualPassphrase = value,
+            ),
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
@@ -700,6 +717,7 @@ class _HomeScreenState extends State<HomeScreen> {
       username: _manualUsername,
       password: _manualToken,
       privateKey: _manualPrivateKey,
+      keyPassphrase: _manualPassphrase,
       name: _manualName.isNotEmpty ? _manualName : 'SSH 远程',
       workingDirectory:
           _sshWorkingDirectory.isEmpty ? '.' : _sshWorkingDirectory,
@@ -717,12 +735,14 @@ class _HomeScreenState extends State<HomeScreen> {
     _usernameController.text = gateway.username;
     _tokenController.text = gateway.token;
     _privateKeyController.text = gateway.privateKey;
+    _passphraseController.text = gateway.keyPassphrase;
     _nameController.text = gateway.name;
     _manualHost = gateway.host;
     _manualPort = gateway.port;
     _manualUsername = gateway.username;
     _manualToken = gateway.token;
     _manualPrivateKey = gateway.privateKey;
+    _manualPassphrase = gateway.keyPassphrase;
     _manualName = gateway.name;
     _sshWorkingDirectory = gateway.workingDirectory;
 
@@ -819,6 +839,33 @@ class _HomeScreenState extends State<HomeScreen> {
                   maxLines: 4,
                   onChanged: (value) => _manualPrivateKey = value,
                 ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _passphraseController,
+                  decoration:
+                      const InputDecoration(labelText: '私钥密码（可选）'),
+                  obscureText: true,
+                  onChanged: (value) => _manualPassphrase = value,
+                ),
+                if (isEditing) ...[
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.key_off_outlined, size: 18),
+                      label: const Text('清除已记住的主机密钥'),
+                      onPressed: () async {
+                        await SshHostKeys.forget(
+                          existingGateway.host,
+                          existingGateway.port,
+                        );
+                        if (context.mounted) {
+                          showAppNotice(context, '下次连接时会重新确认主机密钥');
+                        }
+                      },
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
