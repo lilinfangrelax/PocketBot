@@ -4,6 +4,7 @@ import 'package:pocket_bot/config/update_config.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
 import 'package:pocket_bot/services/github_update_service.dart';
 import 'package:pocket_bot/utils/logger.dart';
+import 'package:pocket_bot/widgets/fluent_page.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// Settings card for GitHub Release channel + manual check.
@@ -24,7 +25,7 @@ class _UpdateSettingsCardState extends State<UpdateSettingsCard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _sectionHeader('更新'),
+        const FluentSectionHeader('更新'),
         Card(
           child: Column(
             children: [
@@ -32,13 +33,10 @@ class _UpdateSettingsCardState extends State<UpdateSettingsCard> {
                 leading: const Icon(Icons.alt_route),
                 title: const Text('更新通道'),
                 subtitle: Text(channel.description),
-                trailing: Text(
-                  channel.displayName,
-                  style: TextStyle(color: Colors.grey[600]),
-                ),
+                trailing: Text(channel.displayName),
                 onTap: () => _showChannelDialog(context),
               ),
-              const Divider(),
+              const Divider(indent: 54),
               ListTile(
                 leading: const Icon(Icons.system_update),
                 title: const Text('检查更新'),
@@ -49,7 +47,7 @@ class _UpdateSettingsCardState extends State<UpdateSettingsCard> {
                     ? const SizedBox(
                         width: 20,
                         height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: fluent.ProgressRing(strokeWidth: 2),
                       )
                     : const Icon(Icons.chevron_right),
                 onTap: _checking ? null : () => _checkForUpdates(context),
@@ -58,21 +56,6 @@ class _UpdateSettingsCardState extends State<UpdateSettingsCard> {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _sectionHeader(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 8, bottom: 8),
-      child: Text(
-        title,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-          color: Colors.grey[600],
-          letterSpacing: 1.2,
-        ),
-      ),
     );
   }
 
@@ -155,7 +138,9 @@ class UpdateDialogs {
                 const SizedBox(height: 8),
                 Text(
                   result.release.prerelease ? 'Beta 通道' : '正式版',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: FluentColors.of(context).textSecondary),
                 ),
                 if (changelog != null && changelog.isNotEmpty) ...[
                   const SizedBox(height: 16),
@@ -168,7 +153,9 @@ class UpdateDialogs {
                   const SizedBox(height: 16),
                   Text(
                     '文件：${asset.name}（${asset.formattedSize}）',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: FluentColors.of(context).textSecondary),
                   ),
                 ],
               ],

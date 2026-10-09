@@ -2,6 +2,7 @@ import 'package:fluent_ui/fluent_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
 import 'package:pocket_bot/widgets/fluent_page.dart';
+import 'package:pocket_bot/widgets/fluent_tab_bar.dart';
 
 void main() {
   test('buildFluentTheme returns a fluent_ui theme', () {
@@ -14,7 +15,8 @@ void main() {
     expect(dark.accentColor, Colors.teal);
   });
 
-  testWidgets('FluentScreen uses ScaffoldPage and PageHeader', (tester) async {
+  testWidgets('FluentScreen uses ScaffoldPage with a compact header',
+      (tester) async {
     await tester.pumpWidget(
       FluentApp(
         theme: buildFluentTheme(Brightness.light),
@@ -26,54 +28,49 @@ void main() {
     );
 
     expect(find.byType(ScaffoldPage), findsOneWidget);
-    expect(find.byType(PageHeader), findsOneWidget);
+    expect(find.byType(FluentPageHeader), findsOneWidget);
+    expect(
+      tester.getSize(find.byType(FluentPageHeader)).height,
+      FluentPageHeader.height,
+    );
     expect(find.text('消息'), findsOneWidget);
     expect(find.text('会话列表'), findsOneWidget);
   });
 
-  testWidgets('top NavigationView shows every tab label', (tester) async {
+  testWidgets('FluentTabBar shows every tab on a phone and reports taps',
+      (tester) async {
+    tester.view.physicalSize = const Size(360, 780);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    var selected = 0;
     await tester.pumpWidget(
       FluentApp(
         theme: buildFluentTheme(Brightness.light),
-        home: NavigationView(
-          pane: NavigationPane(
-            selected: 0,
-            displayMode: PaneDisplayMode.top,
-            toggleButton: null,
-            items: [
-              PaneItem(
-                icon: const Icon(WindowsIcons.chat_bubbles),
-                title: const Text('消息'),
-                body: const SizedBox.shrink(),
-              ),
-              PaneItem(
-                icon: const Icon(WindowsIcons.people),
-                title: const Text('通讯录'),
-                body: const SizedBox.shrink(),
-              ),
-              PaneItem(
-                icon: const Icon(WindowsIcons.globe),
-                title: const Text('发现'),
-                body: const SizedBox.shrink(),
-              ),
-              PaneItem(
-                icon: const Icon(WindowsIcons.settings),
-                title: const Text('我'),
-                body: const SizedBox.shrink(),
-              ),
-            ],
+        home: StatefulBuilder(
+          builder: (context, setState) => Align(
+            alignment: Alignment.bottomCenter,
+            child: FluentTabBar(
+              selected: selected,
+              onChanged: (index) => setState(() => selected = index),
+              tabs: const [
+                FluentTab(icon: WindowsIcons.chat_bubbles, label: '消息'),
+                FluentTab(icon: WindowsIcons.people, label: '通讯录'),
+                FluentTab(icon: WindowsIcons.robot, label: '发现'),
+                FluentTab(icon: WindowsIcons.contact, label: '我'),
+              ],
+            ),
           ),
-          paneBodyBuilder: (item, body) => const Text('页面'),
         ),
       ),
     );
-    await tester.pump();
 
-    expect(find.byType(NavigationView), findsOneWidget);
-    expect(find.text('消息'), findsWidgets);
-    expect(find.text('通讯录'), findsWidgets);
-    expect(find.text('发现'), findsWidgets);
-    expect(find.text('我'), findsWidgets);
-    expect(find.text('页面'), findsOneWidget);
+    for (final label in ['消息', '通讯录', '发现', '我']) {
+      expect(find.text(label), findsOneWidget);
+    }
+
+    await tester.tap(find.text('我'));
+    await tester.pumpAndSettle();
+    expect(selected, 3);
   });
 }

@@ -215,10 +215,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           const UpdateSettingsCard(),
 
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
 
           // App Settings
-          _buildSectionHeader('应用'),
+          const FluentSectionHeader('应用'),
           Card(
             child: Column(
               children: [
@@ -251,7 +251,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   trailing: const Icon(Icons.chevron_right),
                   onTap: _showAvatarOptions,
                 ),
-                const Divider(),
+                const Divider(indent: 54),
                 ListTile(
                   leading: const Icon(Icons.notifications),
                   title: const Text('通知'),
@@ -263,7 +263,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     },
                   ),
                 ),
-                const Divider(),
+                const Divider(indent: 54),
                 ListTile(
                   leading: const Icon(Icons.dark_mode),
                   title: const Text('主题'),
@@ -271,7 +271,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _showThemeDialog(context),
                 ),
-                const Divider(),
+                const Divider(indent: 54),
                 ListTile(
                   leading: const Icon(Icons.language),
                   title: const Text('语言'),
@@ -281,7 +281,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     // TODO: Implement language selection
                   },
                 ),
-                const Divider(),
+                const Divider(indent: 54),
                 ListTile(
                   leading: const Icon(Icons.delete_forever),
                   title: const Text('清除全部会话'),
@@ -293,7 +293,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
 
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
 
           _buildSectionHeader('代理'),
           Card(
@@ -335,7 +335,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 24),
 
           // About
-          _buildSectionHeader('关于'),
+          const FluentSectionHeader('关于'),
           Card(
             child: Column(
               children: [
@@ -344,7 +344,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: const Text('PocketBot'),
                   subtitle: Text(AppVersion.displayVersion),
                 ),
-                const Divider(),
+                const Divider(indent: 54),
                 ListTile(
                   leading: const Icon(Icons.code),
                   title: const Text('开源'),
@@ -352,7 +352,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   trailing: const Icon(Icons.open_in_new),
                   onTap: () => UpdateDialogs.openRepo(),
                 ),
-                const Divider(),
+                const Divider(indent: 54),
                 ListTile(
                   leading: const Icon(Icons.description),
                   title: const Text('隐私政策'),
@@ -365,10 +365,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
 
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
 
           // Debug
-          _buildSectionHeader('调试'),
+          const FluentSectionHeader('调试'),
           Card(
             child: Column(
               children: [
@@ -383,7 +383,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     },
                   ),
                 ),
-                const Divider(),
+                const Divider(indent: 54),
                 ListTile(
                   leading: const Icon(Icons.terminal),
                   title: const Text('查看日志'),
@@ -453,21 +453,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: const Text('关闭'),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildSectionHeader(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 8, bottom: 8),
-      child: Text(
-        title,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-          color: Colors.grey[600],
-          letterSpacing: 1.2,
-        ),
       ),
     );
   }

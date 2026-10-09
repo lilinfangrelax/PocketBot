@@ -89,11 +89,15 @@ class _ContactsScreenState extends State<ContactsScreen> {
       content: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: _kSpacingMedium),
+            padding: const EdgeInsets.fromLTRB(
+                _kSpacingMedium, 0, _kSpacingMedium, 8),
             child: fluent.TextBox(
               controller: _searchController,
               placeholder: '搜索联系人...',
-              prefix: const Icon(fluent.WindowsIcons.search),
+              prefix: const Padding(
+                padding: EdgeInsetsDirectional.only(start: 10),
+                child: Icon(fluent.WindowsIcons.search, size: 14),
+              ),
               onChanged: _searchContacts,
             ),
           ),
@@ -116,8 +120,17 @@ class _ContactsScreenState extends State<ContactsScreen> {
         ),
         // 联系人列表
         _contacts.isEmpty
-            ? const SliverFillRemaining(
-                child: Center(child: Text('暂无联系人')),
+            ? SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: Text(
+                    '暂无联系人',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: FluentColors.of(context).textSecondary,
+                    ),
+                  ),
+                ),
               )
             : SliverList(
                 delegate: SliverChildBuilderDelegate(
@@ -134,33 +147,30 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
   /// 构建群聊入口
   Widget _buildGroupChatEntry() {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: FluentColors.of(context).accent,
-            borderRadius: BorderRadius.circular(4),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          _kSpacingMedium, 4, _kSpacingMedium, _kSpacingMedium),
+      child: Card(
+        child: ListTile(
+          leading: const FluentIconAvatar(
+            icon: fluent.WindowsIcons.people,
+            size: 40,
           ),
-          child: Icon(
-            Icons.group,
-            color: FluentColors.of(context).onAccent,
-            size: 22,
-          ),
+          title: const Text('群聊'),
+          subtitle: const Text('查看所有群聊，包括已隐藏的'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: _navigateToGroupChatList,
         ),
-        title: const Text('群聊'),
-        subtitle: const Text('查看所有群聊，包括已隐藏的'),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: _navigateToGroupChatList,
       ),
     );
   }
 
   Widget _buildContactItem(Contact contact) {
+    final colors = FluentColors.of(context);
     return ListTile(
       leading: CircleAvatar(
+        backgroundColor: colors.accentSubtle,
+        foregroundColor: colors.accent,
         backgroundImage:
             contact.avatar != null ? NetworkImage(contact.avatar!) : null,
         child:
@@ -172,9 +182,17 @@ class _ContactsScreenState extends State<ContactsScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (!contact.isActive)
-            const Chip(
-              label: Text('离线'),
-              backgroundColor: Colors.grey,
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: colors.control,
+                border: Border.all(color: colors.stroke),
+                borderRadius: BorderRadius.circular(FluentColors.radius),
+              ),
+              child: Text(
+                '离线',
+                style: TextStyle(fontSize: 12, color: colors.textSecondary),
+              ),
             ),
         ],
       ),

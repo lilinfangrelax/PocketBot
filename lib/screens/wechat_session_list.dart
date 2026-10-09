@@ -18,6 +18,8 @@ import 'package:pocket_bot/theme/fluent_theme.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/services/websocket_service.dart';
 
+const double _kAvatarSize = 44;
+
 /// 会话项类型
 enum SessionItemType { personal, group }
 
@@ -196,7 +198,10 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
             controller: _searchController,
             autofocus: true,
             placeholder: '搜索会话',
-            prefix: const Icon(fluent.WindowsIcons.search),
+            prefix: const Padding(
+              padding: EdgeInsetsDirectional.only(start: 10),
+              child: Icon(fluent.WindowsIcons.search, size: 14),
+            ),
             suffix: fluent.IconButton(
               icon: const Icon(Icons.clear),
               onPressed: () {
@@ -334,73 +339,18 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
       background: Container(
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
-        color: Colors.red,
-        child: const Icon(Icons.delete, color: Colors.white),
+        color: FluentColors.of(context).danger,
+        child: Icon(fluent.WindowsIcons.delete,
+            color: FluentColors.of(context).onAccent),
       ),
-      child: GestureDetector(
+      child: _SessionRow(
+        selected: isCurrentSession,
         onTap: () => _selectSession(sessionItem),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            color:
-                isCurrentSession ? FluentColors.of(context).accentSubtle : null,
-            border: Border(
-              bottom: BorderSide(color: FluentColors.of(context).stroke),
-            ),
-          ),
-          child: Row(
-            children: [
-              _buildAvatar(sessionItem, isCurrentSession),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            sessionItem.title,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.normal,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        Text(
-                          _formatTime(sessionItem.lastUpdated),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[500],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            sessionItem.lastMessage ?? '暂无消息',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey[500],
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (unreadCount > 0) UnreadBadge(count: unreadCount),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
+        avatar: _buildAvatar(sessionItem, isCurrentSession),
+        title: sessionItem.title,
+        time: _formatTime(sessionItem.lastUpdated),
+        preview: sessionItem.lastMessage ?? '暂无消息',
+        unreadCount: unreadCount,
       ),
     );
   }
@@ -410,24 +360,9 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
       // 群聊头像：多个头像的集合
       return _buildGroupAvatar(sessionItem.groupChat!);
     } else {
-      // 个人会话头像
-      const icon = Icons.chat_bubble;
-      final colors = FluentColors.of(context);
-      final iconColor = colors.onAccent;
-      final bgColor = colors.accent;
-
-      return Container(
-        width: 48,
-        height: 48,
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Icon(
-          icon,
-          color: iconColor,
-          size: 26,
-        ),
+      return const FluentIconAvatar(
+        icon: fluent.WindowsIcons.chat_bubbles,
+        size: _kAvatarSize,
       );
     }
   }
@@ -437,18 +372,9 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
     final members = group.members;
     if (members.isEmpty) {
       // 无成员，显示默认群聊图标
-      return Container(
-        width: 48,
-        height: 48,
-        decoration: BoxDecoration(
-          color: FluentColors.of(context).accent,
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Icon(
-          Icons.group,
-          color: FluentColors.of(context).onAccent,
-          size: 26,
-        ),
+      return const FluentIconAvatar(
+        icon: fluent.WindowsIcons.people,
+        size: _kAvatarSize,
       );
     }
 
@@ -457,14 +383,14 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
     final displayMembers = members.take(displayCount).toList();
 
     return SizedBox(
-      width: 48,
-      height: 48,
+      width: _kAvatarSize,
+      height: _kAvatarSize,
       child: Stack(
         children: [
           // 2x2 网格布局
           if (displayCount == 1)
             Positioned.fill(
-              child: _buildMemberAvatar(displayMembers[0], 48),
+              child: _buildMemberAvatar(displayMembers[0], _kAvatarSize),
             )
           else if (displayCount == 2)
             _buildGrid2(displayMembers)
@@ -561,11 +487,12 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
   }
 
   Widget _buildDefaultAvatar(String name, double size) {
+    final colors = FluentColors.of(context);
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: Colors.grey[300],
+        color: colors.accentSubtle,
         borderRadius: BorderRadius.circular(2),
       ),
       child: Center(
@@ -573,8 +500,8 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
           name.isNotEmpty ? name[0].toUpperCase() : '?',
           style: TextStyle(
             fontSize: size * 0.4,
-            fontWeight: FontWeight.bold,
-            color: Colors.grey[600],
+            fontWeight: FontWeight.w600,
+            color: colors.accent,
           ),
         ),
       ),
@@ -604,8 +531,6 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
 
   @override
   Widget build(BuildContext context) {
-    final bool isDarkMode = Theme.of(context).brightness == Brightness.dark;
-
     return FluentScreen(
       title: const Text('消息'),
       commands: Row(
@@ -624,7 +549,7 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
       content: _isLoading
           ? const Center(child: fluent.ProgressRing())
           : _allSessions.isEmpty
-              ? _buildEmptyState(isDarkMode)
+              ? _buildEmptyState()
               : RefreshIndicator(
                   onRefresh: _loadSessions,
                   child: ListView.builder(
@@ -641,37 +566,46 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
     );
   }
 
-  Widget _buildEmptyState(bool isDarkMode) {
+  Widget _buildEmptyState() {
+    final colors = FluentColors.of(context);
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.chat_bubble_outline,
-            size: 80,
-            color: isDarkMode ? Colors.grey[700] : Colors.grey[300],
-          ),
-          const SizedBox(height: 16),
-          Text(
-            '暂无会话',
-            style: TextStyle(
-              fontSize: 16,
-              color: isDarkMode ? Colors.grey[500] : Colors.grey[500],
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const FluentIconAvatar(
+              icon: fluent.WindowsIcons.chat_bubbles,
+              size: 72,
             ),
-          ),
-          const SizedBox(height: 8),
-          fluent.FilledButton(
-            onPressed: _createSession,
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(fluent.WindowsIcons.add, size: 16),
-                SizedBox(width: 8),
-                Text('新建会话'),
-              ],
+            const SizedBox(height: 16),
+            Text(
+              '暂无会话',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: colors.textPrimary,
+              ),
             ),
-          ),
-        ],
+            const SizedBox(height: 4),
+            Text(
+              '新建一个会话，开始和代理聊天',
+              style: TextStyle(fontSize: 13, color: colors.textSecondary),
+            ),
+            const SizedBox(height: 20),
+            fluent.FilledButton(
+              onPressed: _createSession,
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(fluent.WindowsIcons.add, size: 14),
+                  SizedBox(width: 8),
+                  Text('新建会话'),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -684,5 +618,118 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
     }
     _searchController.dispose();
     super.dispose();
+  }
+}
+
+class _SessionRow extends StatelessWidget {
+  const _SessionRow({
+    required this.selected,
+    required this.onTap,
+    required this.avatar,
+    required this.title,
+    required this.time,
+    required this.preview,
+    required this.unreadCount,
+  });
+
+  final bool selected;
+  final VoidCallback onTap;
+  final Widget avatar;
+  final String title;
+  final String time;
+  final String preview;
+  final int unreadCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = FluentColors.of(context);
+    return fluent.HoverButton(
+      onPressed: onTap,
+      builder: (context, states) {
+        final Color background;
+        if (states.isPressed) {
+          background = colors.stroke;
+        } else if (selected) {
+          background = colors.accentSubtle;
+        } else {
+          background = const Color(0x00000000);
+        }
+        return ColoredBox(
+          color: background,
+          child: Padding(
+            padding: const EdgeInsetsDirectional.only(start: 16),
+            child: Row(
+              children: [
+                avatar,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsetsDirectional.only(
+                      top: 14,
+                      bottom: 14,
+                      end: 16,
+                    ),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(color: colors.stroke),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                title,
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: colors.textPrimary,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              time,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: colors.textTertiary,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 3),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                preview,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: colors.textSecondary,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (unreadCount > 0) ...[
+                              const SizedBox(width: 8),
+                              UnreadBadge(count: unreadCount),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 }
