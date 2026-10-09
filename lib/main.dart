@@ -6,6 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pocket_bot/config/update_config.dart';
 import 'package:pocket_bot/screens/main_screen.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
+import 'package:pocket_bot/services/contact_agent_linker.dart';
+import 'package:pocket_bot/services/group_chat_service.dart';
 import 'package:pocket_bot/services/github_update_service.dart';
 import 'package:pocket_bot/services/notification_service.dart';
 import 'package:pocket_bot/services/ssh_host_keys.dart';
@@ -46,7 +48,14 @@ Future<void> main() async {
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => ConnectionManager()),
+        ChangeNotifierProvider(
+          lazy: false,
+          create: (_) {
+            final manager = ConnectionManager();
+            GroupChatService().linker = ContactAgentLinker(manager);
+            return manager;
+          },
+        ),
         ChangeNotifierProvider(create: (_) => WebSocketService()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => UserConfigProvider()),

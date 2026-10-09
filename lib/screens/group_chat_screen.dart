@@ -1,9 +1,7 @@
 import 'package:fluent_ui/fluent_ui.dart' as fluent;
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:pocket_bot/models/group_chat.dart';
 import 'package:pocket_bot/services/group_chat_service.dart';
-import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
 import 'package:pocket_bot/widgets/fluent_page.dart';
 import 'package:pocket_bot/utils/logger.dart';
@@ -28,7 +26,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   List<GroupMessage> _messages = [];
   bool _isLoading = true;
   bool _isSending = false;
-  bool _isTyping = false; // AI 正在输入
+  final Set<String> _thinking = {};
 
   // 当前用户信息（应该从用户服务获取）
   final String _currentUserId = 'current_user';
@@ -100,9 +98,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       // 滚动到底部
       _scrollToBottom();
 
-      // TODO: 处理@提及和AI响应
-      // 模拟 AI 响应（实际应该连接 AI 服务）
-      _simulateAIResponse();
+      _dispatchToAgents(message);
     } catch (e) {
       Logger.error('Failed to send message: $e');
       if (mounted) {
@@ -117,32 +113,30 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     }
   }
 
-  /// 模拟 AI 响应（placeholder）
-  void _simulateAIResponse() async {
-    // 显示正在输入
-    setState(() => _isTyping = true);
-
-    // 模拟延迟
-    await Future.delayed(const Duration(seconds: 2));
-
-    if (!mounted) return;
-
-    // 创建 AI 消息
-    final aiMessage = GroupMessage(
-      id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
-      groupId: widget.groupId,
-      senderId: 'ai_assistant',
-      senderName: 'AI 助手',
-      senderAvatar: null,
-      content: '收到消息: "${_messages.last.content}"\n\n这是一个群聊测试消息。',
-      timestamp: DateTime.now(),
+  Future<void> _dispatchToAgents(GroupMessage message) async {
+    final group = _group;
+    if (group == null) return;
+    final replies = await _groupChatService.dispatchToAgents(
+      group,
+      message,
+      onStatus: (name, error) {
+        if (!mounted) return;
+        setState(() {
+          if (error == null) {
+            _thinking.add(name);
+          } else {
+            _thinking.remove(name);
+          }
+        });
+        if (error != null) showAppNotice(context, '$name 无法回复：$error');
+      },
     );
-
+    if (!mounted) return;
     setState(() {
-      _messages.add(aiMessage);
-      _isTyping = false;
+      _thinking.clear();
+      _messages.addAll(replies);
+      _messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
     });
-
     _scrollToBottom();
   }
 
@@ -227,7 +221,30 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                 ),
 
                 // 打字指示器
-                if (_isTyping) TypingIndicator(isDarkMode: isDarkMode),
+                if (_thinking.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 4),
+                    child: Row(
+                      children: [
+                        const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: fluent.ProgressRing(strokeWidth: 2),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '${_thinking.join('、')} 正在回复…',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: colors.textSecondary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
 
                 // 输入框
                 _buildInputBar(isDarkMode),
@@ -292,7 +309,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                 child: TextField(
                   controller: _messageController,
                   decoration: InputDecoration(
-                    hintText: '',
+                    hintText: '@名称 让代理回复',
                     border: InputBorder.none,
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 12,

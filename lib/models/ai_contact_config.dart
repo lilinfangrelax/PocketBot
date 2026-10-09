@@ -5,6 +5,12 @@ class AIContactConfig {
   final String id;
   final String contactId; // 联系人 ID
   final String agentId; // ACP Agent identifier
+  final String agentLabel;
+
+  /// [GatewayInfo.connectionId] of the saved connection the agent runs on.
+  /// Credentials stay in secure storage; only this reference is kept here.
+  final String gatewayId;
+  final String workingDirectory;
   final String? model; // 使用的模型（可选）
   final String? systemPrompt; // 自定义系统提示词
   final Map<String, dynamic>? tools; // 允许使用的工具
@@ -17,6 +23,9 @@ class AIContactConfig {
     this.id = '',
     required this.contactId,
     required this.agentId,
+    this.agentLabel = '',
+    this.gatewayId = '',
+    this.workingDirectory = '',
     this.model,
     this.systemPrompt,
     this.tools,
@@ -32,6 +41,9 @@ class AIContactConfig {
       id: json['id'] ?? '',
       contactId: json['contactId'] ?? '',
       agentId: json['agentId'] ?? '',
+      agentLabel: json['agentLabel'] ?? '',
+      gatewayId: json['gatewayId'] ?? '',
+      workingDirectory: json['workingDirectory'] ?? '',
       model: json['model'],
       systemPrompt: json['systemPrompt'],
       tools: json['tools'] is Map
@@ -54,6 +66,9 @@ class AIContactConfig {
       'id': id,
       'contactId': contactId,
       'agentId': agentId,
+      'agentLabel': agentLabel,
+      'gatewayId': gatewayId,
+      'workingDirectory': workingDirectory,
       'model': model,
       'systemPrompt': systemPrompt,
       'tools': tools,
@@ -70,6 +85,9 @@ class AIContactConfig {
       'id': id,
       'contact_id': contactId,
       'agent_id': agentId,
+      'agent_label': agentLabel,
+      'gateway_id': gatewayId,
+      'working_directory': workingDirectory,
       'model': model,
       'system_prompt': systemPrompt,
       'tools': tools != null ? jsonEncode(tools) : null,
@@ -86,6 +104,9 @@ class AIContactConfig {
       id: map['id'] ?? '',
       contactId: map['contact_id'] ?? '',
       agentId: map['agent_id'] ?? '',
+      agentLabel: map['agent_label'] ?? '',
+      gatewayId: map['gateway_id'] ?? '',
+      workingDirectory: map['working_directory'] ?? '',
       model: map['model'],
       systemPrompt: map['system_prompt'],
       tools: map['tools'] != null
@@ -108,6 +129,9 @@ class AIContactConfig {
     String? id,
     String? contactId,
     String? agentId,
+    String? agentLabel,
+    String? gatewayId,
+    String? workingDirectory,
     String? model,
     String? systemPrompt,
     Map<String, dynamic>? tools,
@@ -120,6 +144,9 @@ class AIContactConfig {
       id: id ?? this.id,
       contactId: contactId ?? this.contactId,
       agentId: agentId ?? this.agentId,
+      agentLabel: agentLabel ?? this.agentLabel,
+      gatewayId: gatewayId ?? this.gatewayId,
+      workingDirectory: workingDirectory ?? this.workingDirectory,
       model: model ?? this.model,
       systemPrompt: systemPrompt ?? this.systemPrompt,
       tools: tools ?? this.tools,
@@ -129,6 +156,8 @@ class AIContactConfig {
       updatedAt: updatedAt ?? DateTime.now(),
     );
   }
+
+  bool get hasAgent => gatewayId.isNotEmpty;
 
   @override
   bool operator ==(Object other) {

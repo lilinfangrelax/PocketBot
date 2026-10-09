@@ -1,9 +1,8 @@
 import 'dart:async';
 import 'package:pocket_bot/models/group_chat.dart';
-import 'package:pocket_bot/models/contact.dart';
+import 'package:pocket_bot/models/ai_contact_config.dart';
 import 'package:pocket_bot/services/database_service.dart';
-import 'package:pocket_bot/services/contact_service.dart';
-import 'package:pocket_bot/services/websocket_service.dart';
+import 'package:pocket_bot/services/contact_agent_linker.dart';
 import 'package:pocket_bot/utils/logger.dart';
 
 /// 群聊服务 - 处理@提及解析和AI触发逻辑
@@ -13,13 +12,8 @@ class GroupChatService {
   GroupChatService._internal();
 
   final DatabaseService _db = DatabaseService();
-  final ContactService _contactService = ContactService();
-  WebSocketService? _wsService;
-
-  /// 设置 WebSocketService（需要在连接成功后调用）
-  void setWebSocketService(WebSocketService wsService) {
-    _wsService = wsService;
-  }
+  /// Set at startup; resolves AI members to their agent connections.
+  ContactAgentLinker? linker;
 
   /// 从文本中解析@提及
   /// 返回匹配到的 AtInfo 列表
@@ -49,115 +43,96 @@ class GroupChatService {
     return atList;
   }
 
-  /// 处理群消息
-  /// 如果消息中有@提及，触发AI响应
-  Future<void> processGroupMessage(GroupMessage message) async {
-    // 解析@提及
-    final atList = parseAtMentionsSync(message.content);
-    
-    if (atList.isEmpty) return; // 没有@任何人
-    
-    // 为消息添加@信息
-    final messageWithAt = message.copyWith(atList: atList);
-    
-    // 保存消息到数据库
-    await _saveGroupMessage(messageWithAt);
-    
-    // 触发AI响应（TODO: 实现具体的AI调用逻辑）
-    for (final atInfo in atList) {
-      await triggerAIResponse(atInfo, message.groupId, messageWithAt);
+  /// Members that should answer [message]: AI members mentioned by @name,
+  /// plus AI members set to reply to every message. Never the sender.
+  static List<GroupMember> agentTargets({
+    required GroupMessage message,
+    required List<GroupMember> members,
+    required Map<String, AIContactConfig> configs,
+    required List<AtInfo> mentions,
+  }) {
+    final mentioned = mentions
+        .map((at) => at.atName?.toLowerCase())
+        .whereType<String>()
+        .toSet();
+    final targets = <GroupMember>[];
+    for (final member in members) {
+      final config = configs[member.userId];
+      if (config == null || member.userId == message.senderId) continue;
+      final names = {
+        member.atName?.toLowerCase(),
+        member.userName.toLowerCase(),
+      }.whereType<String>();
+      final isMentioned = names.any(mentioned.contains);
+      if (isMentioned || config.autoReply) targets.add(member);
     }
+    return targets;
   }
 
-  /// 触发AI响应
-  /// 注意: 需要根据 atInfo.userId 获取联系人信息来构建prompt
-  Future<void> triggerAIResponse(
-    AtInfo atInfo,
-    String groupId,
-    GroupMessage message,
-  ) async {
-    // 检查WebSocket服务是否可用
-    if (_wsService == null) {
-      Logger.warning('[GroupChat] WebSocketService not initialized, cannot trigger AI response');
-      return;
+  static String groupPrompt(GroupChat group, GroupMessage message) =>
+      '群聊「${group.name}」中，${message.senderName} 说：\n${message.content}';
+
+  /// Sends [message] to every agent that should answer it and stores each
+  /// reply as a group message. [onStatus] reports who is thinking or failed.
+  Future<List<GroupMessage>> dispatchToAgents(
+    GroupChat group,
+    GroupMessage message, {
+    void Function(String memberName, String? error)? onStatus,
+  }) async {
+    final linker = this.linker;
+    if (linker == null) {
+      Logger.warning('[GroupChat] No agent linker, skipping AI replies');
+      return const [];
     }
-
-    // 1. 通过 atName 在群成员中查找
-    final atName = atInfo.atName;
-    if (atName == null || atName.isEmpty) {
-      Logger.debug('[GroupChat] atName is empty, cannot find member');
-      return;
+    final configs = <String, AIContactConfig>{};
+    for (final member in group.members) {
+      final config = await linker.configFor(member.userId);
+      if (config != null) configs[member.userId] = config;
     }
-    final member = await _db.getMemberByAtName(groupId, atName);
-    if (member == null) {
-      Logger.debug('[GroupChat] Member with atName $atName not found in group $groupId');
-      return;
-    }
+    final targets = agentTargets(
+      message: message,
+      members: group.members,
+      configs: configs,
+      mentions: parseAtMentionsSync(message.content),
+    );
 
-    // 2. 获取联系人信息，确认是AI
-    final contact = await _contactService.getContact(member.userId);
-    if (contact == null || !contact.isAI) {
-      Logger.debug('[GroupChat] Contact ${member.userId} is not an AI contact');
-      return;
-    }
-
-    // 3. 跳过AI自己发送的消息，避免无限循环
-    if (message.senderId == contact.id) {
-      Logger.debug('[GroupChat] Skipping AI self-message to avoid infinite loop');
-      return;
-    }
-
-    Logger.info('[GroupChat] Triggering AI response for ${contact.name} in group $groupId');
-
-    // 4. 获取或创建群聊专属 session
-    final sessionKey = 'group_${groupId}_ai_${contact.id}';
-    _wsService!.selectSession(sessionKey, agentId: contact.id);
-
-    // 5. 监听AI响应并保存到群消息
-    _listenForAIResponse(sessionKey, groupId, contact);
-
-    // 6. 发送消息给AI
-    try {
-      await _wsService!.sendMessage(message.content, sessionKey: sessionKey);
-    } catch (e) {
-      Logger.error('[GroupChat] Failed to send message to AI: $e');
-    }
-  }
-
-  /// 监听AI响应并保存到群消息
-  void _listenForAIResponse(String sessionKey, String groupId, Contact contact) {
-    final session = _wsService?.getSession(sessionKey);
-    if (session == null) {
-      Logger.warning('[GroupChat] Session $sessionKey not found');
-      return;
-    }
-
-    // 监听会话消息流
-    session.messageStream.listen((msg) async {
-      if (!msg.isUser && msg.text.isNotEmpty) {
-        Logger.info('[GroupChat] Received AI response: ${msg.text.substring(0, msg.text.length > 50 ? 50 : msg.text.length)}...');
-
-        // 创建AI响应消息
-        final aiMessage = GroupMessage(
-          id: msg.id,
-          groupId: groupId,
-          senderId: contact.id,
-          senderName: contact.name,
-          senderAvatar: contact.avatar,
-          content: msg.text,
-          timestamp: msg.timestamp,
-          isDeleted: false,
+    final replies = await Future.wait(targets.map((member) async {
+      final config = configs[member.userId]!;
+      onStatus?.call(member.userName, null);
+      try {
+        final service = await linker.serviceFor(config);
+        final sessionKey = await linker.sessionFor(
+          service: service,
+          contactId: member.userId,
+          groupId: group.id,
+          title: '${group.name} · ${member.userName}',
         );
-
-        // 保存到数据库
-        await _saveGroupMessage(aiMessage);
+        final text = await service.sendMessageAndWait(
+          groupPrompt(group, message),
+          sessionKey: sessionKey,
+        );
+        if (text.trim().isEmpty) return null;
+        final reply = GroupMessage(
+          id: 'msg_${DateTime.now().microsecondsSinceEpoch}_${member.userId}',
+          groupId: group.id,
+          senderId: member.userId,
+          senderName: member.userName,
+          senderAvatar: member.userAvatar,
+          content: text,
+          timestamp: DateTime.now(),
+        );
+        await sendGroupMessage(reply);
+        return reply;
+      } catch (error) {
+        Logger.warning('[GroupChat] ${member.userName} failed: $error');
+        onStatus?.call(
+          member.userName,
+          error.toString().replaceFirst('Exception: ', ''),
+        );
+        return null;
       }
-    });
-  }
-
-  /// 保存群消息到数据库
-  Future<void> _saveGroupMessage(GroupMessage message) async {
-    await sendGroupMessage(message);
+    }));
+    return replies.whereType<GroupMessage>().toList();
   }
 
   /// 发送群消息（公开方法）

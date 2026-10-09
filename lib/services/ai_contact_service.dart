@@ -13,6 +13,13 @@ class AIContactService {
 
   AIContactService();
 
+  /// Group id used for a contact's one-to-one chat session mapping.
+  static const directChatId = 'direct';
+
+  static Future<void>? _ready;
+
+  Future<void> _ensureTables() => _ready ??= initTables();
+
   /// 初始化数据库表
   Future<void> initTables() async {
     // 创建 AI 联系人配置表
@@ -44,12 +51,27 @@ class AIContactService {
         UNIQUE(contact_id, group_id)
       )
     ''');
+
+    for (final column in const [
+      'agent_label TEXT',
+      'gateway_id TEXT',
+      'working_directory TEXT',
+    ]) {
+      try {
+        await _db.execute('ALTER TABLE ai_contact_configs ADD COLUMN $column');
+      } catch (_) {
+        // Column already exists.
+      }
+    }
   }
 
   /// 创建 AI 联系人
   Future<AIContactConfig> createAIContact({
     required String name,
     required String agentId,
+    String agentLabel = '',
+    String gatewayId = '',
+    String workingDirectory = '',
     String? atName,
     String? model,
     String? systemPrompt,
@@ -57,6 +79,7 @@ class AIContactService {
     bool autoReply = false,
     List<String>? keywords,
   }) async {
+    await _ensureTables();
     // 创建联系人
     final contact = await _contactService.createContact(
       name: name,
@@ -70,6 +93,9 @@ class AIContactService {
       id: 'aicfg_${now.millisecondsSinceEpoch}',
       contactId: contact.id,
       agentId: agentId,
+      agentLabel: agentLabel,
+      gatewayId: gatewayId,
+      workingDirectory: workingDirectory,
       model: model,
       systemPrompt: systemPrompt,
       tools: tools,
@@ -87,6 +113,7 @@ class AIContactService {
 
   /// 获取 AI 联系人配置
   Future<AIContactConfig?> getConfig(String contactId) async {
+    await _ensureTables();
     final results = await _db.query(
       'ai_contact_configs',
       where: 'contact_id = ?',
@@ -99,6 +126,7 @@ class AIContactService {
 
   /// 获取所有 AI 联系人配置
   Future<List<AIContactConfig>> getAllConfigs() async {
+    await _ensureTables();
     final results = await _db.query('ai_contact_configs');
     return results.map((e) => AIContactConfig.fromDbMap(e)).toList();
   }
@@ -107,6 +135,9 @@ class AIContactService {
   Future<AIContactConfig?> updateConfig({
     required String contactId,
     String? agentId,
+    String? agentLabel,
+    String? gatewayId,
+    String? workingDirectory,
     String? model,
     String? systemPrompt,
     Map<String, dynamic>? tools,
@@ -118,6 +149,9 @@ class AIContactService {
 
     final updated = existing.copyWith(
       agentId: agentId,
+      agentLabel: agentLabel,
+      gatewayId: gatewayId,
+      workingDirectory: workingDirectory,
       model: model,
       systemPrompt: systemPrompt,
       tools: tools,
@@ -137,6 +171,7 @@ class AIContactService {
 
   /// 删除 AI 联系人配置
   Future<bool> deleteConfig(String contactId) async {
+    await _ensureTables();
     final result = await _db.delete(
       'ai_contact_configs',
       where: 'contact_id = ?',
@@ -151,6 +186,7 @@ class AIContactService {
     required String groupId,
     required String sessionKey,
   }) async {
+    await _ensureTables();
     // 查询是否已存在映射
     final existing = await getMapping(contactId, groupId);
 
@@ -190,6 +226,7 @@ class AIContactService {
 
   /// 获取会话映射
   Future<ContactSessionMapping?> getMapping(String contactId, String groupId) async {
+    await _ensureTables();
     final results = await _db.query(
       'contact_session_mappings',
       where: 'contact_id = ? AND group_id = ?',
@@ -202,6 +239,7 @@ class AIContactService {
 
   /// 获取联系人的所有映射
   Future<List<ContactSessionMapping>> getMappingsForContact(String contactId) async {
+    await _ensureTables();
     final results = await _db.query(
       'contact_session_mappings',
       where: 'contact_id = ?',
@@ -211,8 +249,21 @@ class AIContactService {
     return results.map((e) => ContactSessionMapping.fromDbMap(e)).toList();
   }
 
+  /// Contact whose one-to-one chat uses [sessionKey], if any.
+  Future<String?> contactForDirectSession(String sessionKey) async {
+    await _ensureTables();
+    final results = await _db.query(
+      'contact_session_mappings',
+      where: 'session_key = ? AND group_id = ?',
+      whereArgs: [sessionKey, directChatId],
+    );
+    if (results.isEmpty) return null;
+    return results.first['contact_id'] as String?;
+  }
+
   /// 获取群聊的所有 AI 联系人映射
   Future<List<ContactSessionMapping>> getMappingsForGroup(String groupId) async {
+    await _ensureTables();
     final results = await _db.query(
       'contact_session_mappings',
       where: 'group_id = ?',
@@ -224,12 +275,22 @@ class AIContactService {
 
   /// 删除会话映射
   Future<bool> deleteMapping(String contactId, String groupId) async {
+    await _ensureTables();
     final result = await _db.delete(
       'contact_session_mappings',
       where: 'contact_id = ? AND group_id = ?',
       whereArgs: [contactId, groupId],
     );
     return result > 0;
+  }
+
+  Future<void> deleteMappingsForContact(String contactId) async {
+    await _ensureTables();
+    await _db.delete(
+      'contact_session_mappings',
+      where: 'contact_id = ?',
+      whereArgs: [contactId],
+    );
   }
 
   /// 更新消息计数
