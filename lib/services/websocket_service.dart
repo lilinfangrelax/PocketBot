@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:pocket_bot/config/session_storage.dart';
+import 'package:pocket_bot/models/acp_tool_call.dart';
 import 'package:pocket_bot/models/attachment.dart';
 import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/models/session_state.dart';
@@ -78,6 +79,78 @@ class AcpTodoItem {
       status: json['status'] as String? ?? 'pending',
     );
   }
+}
+
+class AcpPlanEntry {
+  final String content;
+  final String status;
+  final String? priority;
+
+  const AcpPlanEntry({
+    required this.content,
+    required this.status,
+    this.priority,
+  });
+
+  bool get isDone => status == 'completed';
+  bool get isActive => status == 'in_progress';
+
+  factory AcpPlanEntry.fromJson(Map<String, dynamic> json) {
+    return AcpPlanEntry(
+      content: json['content'] as String? ?? '',
+      status: json['status'] as String? ?? 'pending',
+      priority: json['priority'] as String?,
+    );
+  }
+}
+
+class AcpPermissionOption {
+  final String optionId;
+  final String name;
+
+  /// `allow_once`, `allow_always`, `reject_once` or `reject_always`.
+  final String kind;
+
+  const AcpPermissionOption({
+    required this.optionId,
+    required this.name,
+    required this.kind,
+  });
+
+  bool get allows => kind.startsWith('allow');
+  bool get always => kind.endsWith('always');
+
+  factory AcpPermissionOption.fromJson(Map<String, dynamic> json) {
+    final optionId = json['optionId'] as String? ?? '';
+    var kind = (json['kind'] as String? ?? '').replaceAll('-', '_');
+    if (kind.isEmpty) kind = optionId.replaceAll('-', '_');
+    return AcpPermissionOption(
+      optionId: optionId,
+      name: json['name'] as String? ?? optionId,
+      kind: kind,
+    );
+  }
+}
+
+/// A `session/request_permission` call waiting for the user.
+class AcpPermissionRequest {
+  final dynamic requestId;
+  final String sessionId;
+  final String? toolCallId;
+  final String title;
+  final String? detail;
+  final List<AcpPermissionOption> options;
+
+  const AcpPermissionRequest({
+    required this.requestId,
+    required this.sessionId,
+    required this.title,
+    required this.options,
+    this.toolCallId,
+    this.detail,
+  });
+
+  String get key => requestId.toString();
 }
 
 class AcpConfigOptionValue {
@@ -175,6 +248,10 @@ class WebSocketService with ChangeNotifier {
   List<AcpSlashCommand> _availableCommands = const [];
   List<AcpTodoItem> _todos = const [];
   Map<String, dynamic>? _pendingClientRequest;
+  final Map<String, AcpPermissionRequest> _pendingPermissions = {};
+  final Map<String, List<AcpPlanEntry>> _plans = {};
+  final Map<String, AcpToolCall> _toolCalls = {};
+  bool _autoApprovePermissions = false;
   final _clientRequestController =
       StreamController<Map<String, dynamic>>.broadcast();
 
@@ -229,6 +306,40 @@ class WebSocketService with ChangeNotifier {
       List.unmodifiable(_availableCommands);
   List<AcpTodoItem> get todos => List.unmodifiable(_todos);
   Map<String, dynamic>? get pendingClientRequest => _pendingClientRequest;
+
+  /// Skips permission prompts, like Zed's "always allow tool actions".
+  bool get autoApprovePermissions => _autoApprovePermissions;
+
+  set autoApprovePermissions(bool value) {
+    if (_autoApprovePermissions == value) return;
+    _autoApprovePermissions = value;
+    if (value) {
+      for (final request in _pendingPermissions.values.toList()) {
+        final allow = _preferredAllowOption(request.options);
+        respondToPermission(request, allow?.optionId);
+      }
+    }
+    notifyListeners();
+  }
+
+  List<AcpPermissionRequest> get pendingPermissions =>
+      List.unmodifiable(_pendingPermissions.values);
+
+  List<AcpPermissionRequest> permissionsFor(String? sessionKey) =>
+      _pendingPermissions.values
+          .where((request) => request.sessionId == sessionKey)
+          .toList();
+
+  AcpToolCall? toolCallFor(String? sessionKey, String? toolCallId) =>
+      toolCallId == null ? null : _toolCalls['$sessionKey/$toolCallId'];
+
+  bool isAwaitingPermission(String? toolCallId) =>
+      toolCallId != null &&
+      _pendingPermissions.values
+          .any((request) => request.toolCallId == toolCallId);
+
+  List<AcpPlanEntry> planFor(String? sessionKey) =>
+      List.unmodifiable(_plans[sessionKey] ?? const <AcpPlanEntry>[]);
 
   Future<void> connect({
     required String host,
@@ -389,6 +500,7 @@ class WebSocketService with ChangeNotifier {
     _todos = const [];
     _currentModeId = null;
     _pendingClientRequest = null;
+    _pendingPermissions.clear();
     _frameCoalescer.flush();
     _clearLiveText();
     await _closeTransport();
@@ -566,14 +678,13 @@ class WebSocketService with ChangeNotifier {
       case 'cursor/update_todos':
         _applyTodos(params);
         if (session != null) {
-          _upsertSpecialMessage(
-            session,
-            id: 'todos-${session.sessionKey}',
-            kind: MessageKind.system,
-            text: _todos.isEmpty
-                ? '待办已清空'
-                : '待办\n${_todos.map((item) => '- [${item.status == 'completed' ? 'x' : ' '}] ${item.content}').join('\n')}',
-          );
+          _plans[session.sessionKey] = _todos
+              .map((item) => AcpPlanEntry(
+                    content: item.content,
+                    status: item.status,
+                  ))
+              .toList();
+          notifyListeners();
         }
         if (!asNotification && id != null) {
           _sendJson({
@@ -698,32 +809,116 @@ class WebSocketService with ChangeNotifier {
   }
 
   void _handlePermissionRequest(dynamic id, Map<String, dynamic> params) {
-    final options = params['options'] as List? ?? const [];
-    Map<String, dynamic>? allowed;
+    final options = (params['options'] as List? ?? const [])
+        .map((item) => AcpPermissionOption.fromJson(_asMap(item)))
+        .where((option) => option.optionId.isNotEmpty)
+        .toList();
+    final sessionId =
+        params['sessionId'] as String? ?? _activeSessionKey ?? '';
+    final toolCall = _asMap(params['toolCall']);
+
+    if (_autoApprovePermissions || options.isEmpty) {
+      final allowed = _preferredAllowOption(options);
+      Logger.info(
+        '[ACP] Auto-allowing permission ${allowed?.optionId ?? 'cancelled'}',
+      );
+      _sendPermissionOutcome(id, allowed?.optionId);
+      return;
+    }
+
+    final session = sessionId.isEmpty
+        ? null
+        : _sessions.putIfAbsent(sessionId, () => _newSessionState(sessionId));
+    if (session != null && toolCall.isNotEmpty) {
+      _upsertToolCall(session, {
+        ...toolCall,
+        'status': toolCall['status'] ?? 'pending',
+      });
+    }
+    final request = AcpPermissionRequest(
+      requestId: id,
+      sessionId: sessionId,
+      toolCallId: toolCall['toolCallId'] as String?,
+      title: _nonEmpty(toolCall['title']) ??
+          _toolTitleFromRawInput(toolCall['rawInput']) ??
+          '代理请求执行操作',
+      detail: _permissionDetail(toolCall),
+      options: options,
+    );
+    _pendingPermissions[request.key] = request;
+    notifyListeners();
+    if (_activeSessionKey != sessionId || !_clientRequestController.hasListener) {
+      NotificationService().showMessageNotification(
+        sessionKey: sessionId,
+        sessionName: session?.displayTitle ?? 'PocketBot',
+        message: '需要你的确认：${request.title}',
+      );
+    }
+  }
+
+  String? _permissionDetail(Map<String, dynamic> toolCall) {
+    final raw = _asMap(toolCall['rawInput']);
+    final command = _nonEmpty(raw['command']);
+    if (command != null) return command;
+    final content = toolCall['content'];
+    final text = _contentToText(content);
+    if (text.isNotEmpty) return text;
+    final locations = (toolCall['locations'] as List? ?? const [])
+        .map((item) => _asMap(item)['path'] as String? ?? '')
+        .where((path) => path.isNotEmpty)
+        .join('\n');
+    return locations.isEmpty ? null : locations;
+  }
+
+  AcpPermissionOption? _preferredAllowOption(
+      List<AcpPermissionOption> options) {
+    AcpPermissionOption? fallback;
     for (final option in options) {
-      final value = _asMap(option);
-      final kind = (value['kind'] as String? ?? '').replaceAll('-', '_');
-      final optionId = (value['optionId'] as String? ?? '').replaceAll('-', '_');
-      if (kind == 'allow_once' || optionId == 'allow_once') {
-        allowed = value;
-        break;
-      }
-      if ((kind.startsWith('allow_') || optionId.startsWith('allow_')) &&
-          allowed == null) {
-        allowed = value;
+      if (option.kind == 'allow_once') return option;
+      if (option.allows) fallback ??= option;
+    }
+    return fallback;
+  }
+
+  /// Answers a pending permission request. A null [optionId] cancels it.
+  void respondToPermission(AcpPermissionRequest request, String? optionId) {
+    if (_pendingPermissions.remove(request.key) == null) return;
+    _sendPermissionOutcome(request.requestId, optionId);
+    if (optionId != null) {
+      final option =
+          request.options.where((item) => item.optionId == optionId);
+      final rejected = option.isNotEmpty && !option.first.allows;
+      final session = _sessions[request.sessionId];
+      if (rejected && session != null && request.toolCallId != null) {
+        _upsertToolCall(session, {
+          'toolCallId': request.toolCallId,
+          'status': 'failed',
+        });
       }
     }
-    final outcome = allowed == null
-        ? {'outcome': 'cancelled'}
-        : {'outcome': 'selected', 'optionId': allowed['optionId']};
-    Logger.info(
-      '[ACP] Auto-allowing permission ${allowed?['optionId'] ?? 'cancelled'}',
-    );
+    notifyListeners();
+  }
+
+  void _sendPermissionOutcome(dynamic id, String? optionId) {
     _sendJson({
       'jsonrpc': '2.0',
       'id': id,
-      'result': {'outcome': outcome},
+      'result': {
+        'outcome': optionId == null
+            ? {'outcome': 'cancelled'}
+            : {'outcome': 'selected', 'optionId': optionId},
+      },
     });
+  }
+
+  void _cancelPermissions({String? sessionKey}) {
+    final matching = _pendingPermissions.values
+        .where((request) =>
+            sessionKey == null || request.sessionId == sessionKey)
+        .toList();
+    for (final request in matching) {
+      respondToPermission(request, null);
+    }
   }
 
   Future<void> _handleReadTextFile(
@@ -1004,6 +1199,7 @@ class WebSocketService with ChangeNotifier {
   void cancelPrompt({String? sessionKey}) {
     final selected = sessionKey ?? _activeSessionKey;
     if (selected == null || _transport == null) return;
+    _cancelPermissions(sessionKey: selected);
     _sendJson({
       'jsonrpc': '2.0',
       'method': 'session/cancel',
@@ -1275,19 +1471,11 @@ class WebSocketService with ChangeNotifier {
       _currentModeId = update['currentModeId'] as String? ?? _currentModeId;
       notifyListeners();
     } else if (kind == 'plan') {
-      final entries = update['entries'] as List? ?? const [];
-      final text = entries.map((item) {
-        final entry = _asMap(item);
-        final status = entry['status'] as String? ?? 'pending';
-        final mark = status == 'completed' ? 'x' : ' ';
-        return '- [$mark] ${entry['content'] ?? ''}';
-      }).join('\n');
-      _upsertSpecialMessage(
-        session,
-        id: 'acp-plan-${session.sessionKey}',
-        kind: MessageKind.plan,
-        text: text.isEmpty ? '计划已更新' : text,
-      );
+      _plans[sessionKey] = (update['entries'] as List? ?? const [])
+          .map((item) => AcpPlanEntry.fromJson(_asMap(item)))
+          .where((entry) => entry.content.isNotEmpty)
+          .toList();
+      notifyListeners();
     } else if (kind == 'usage_update') {
       session.model = update['model'] as String? ?? session.model;
     } else if (kind == 'session_info_update') {
@@ -1300,6 +1488,10 @@ class WebSocketService with ChangeNotifier {
 
   void _upsertToolCall(SessionState session, Map<String, dynamic> update) {
     final toolCallId = update['toolCallId'] as String? ?? _generateId();
+    _toolCalls
+        .putIfAbsent('${session.sessionKey}/$toolCallId',
+            () => AcpToolCall(id: toolCallId))
+        .merge(update);
     final id = 'tool-$toolCallId';
     final index = session.messages.indexWhere((message) => message.id == id);
     final previous = index >= 0 ? session.messages[index] : null;
@@ -1605,6 +1797,9 @@ class WebSocketService with ChangeNotifier {
     _todos = const [];
     _currentModeId = null;
     _pendingClientRequest = null;
+    _pendingPermissions.clear();
+    _plans.clear();
+    _toolCalls.clear();
     notifyListeners();
   }
 
@@ -1634,6 +1829,7 @@ class WebSocketService with ChangeNotifier {
       if (!completer.isCompleted) completer.completeError(error);
     }
     _pendingRpc.clear();
+    _pendingPermissions.clear();
     _pendingPromptSessions.clear();
     _pendingUserMessages.clear();
     for (final key in promptSessions) {

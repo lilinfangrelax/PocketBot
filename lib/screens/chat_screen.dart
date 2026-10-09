@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:pocket_bot/widgets/agent_panels.dart';
+import 'package:pocket_bot/widgets/tool_call_card.dart';
 import 'package:pocket_bot/config/session_storage.dart';
 import 'package:pocket_bot/config/user_config.dart';
 import 'package:pocket_bot/main.dart';
@@ -997,6 +999,13 @@ class _ChatScreenState extends State<ChatScreen> {
           // Session info banner
           _buildSessionInfoBanner(isDarkMode, wsService),
 
+          ListenableBuilder(
+            listenable: wsService,
+            builder: (context, _) => PlanPanel(
+              entries: wsService.planFor(wsService.currentSessionKey),
+            ),
+          ),
+
           // Connection status banner - WeChat style
           if (!connectionManager.wsService.isConnected &&
               !connectionManager.wsService.isReconnecting)
@@ -1117,6 +1126,14 @@ class _ChatScreenState extends State<ChatScreen> {
                 const SizedBox(width: 50),
               ],
             ),
+
+          ListenableBuilder(
+            listenable: wsService,
+            builder: (context, _) => PermissionRequestPanel(
+              requests: wsService.permissionsFor(wsService.currentSessionKey),
+              onRespond: wsService.respondToPermission,
+            ),
+          ),
 
           // Input area - WeChat style bottom input bar
           Container(
@@ -1452,57 +1469,34 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildToolBubble(Message message, bool isDarkMode) {
-    final colors = FluentColors.of(context);
-    final status = message.toolStatus ?? '';
-    final color = status == 'failed'
-        ? colors.danger
-        : status == 'completed'
-            ? colors.success
-            : colors.warning;
-    final icon = message.kind == MessageKind.plan
-        ? Icons.checklist
-        : Icons.build_outlined;
+    final wsService = _wsService;
     final lines = message.text
         .split('\n')
         .map((line) => line.trim())
         .where((line) => line.isNotEmpty)
         .toList();
     final title = lines.isEmpty ? '工具调用' : lines.first;
-    final detail = lines.length > 1 ? lines.sublist(1).join(' · ') : '';
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(56, 2, 16, 2),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: colors.card,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: colors.stroke),
+    final summary = lines.length > 1 ? lines.sublist(1).join('\n') : '';
+    if (wsService == null) {
+      return ToolCallCard(
+        key: ValueKey(message.id),
+        title: title,
+        summary: summary,
+        status: message.toolStatus ?? '',
+      );
+    }
+    return ListenableBuilder(
+      listenable: wsService,
+      builder: (context, _) => ToolCallCard(
+        key: ValueKey(message.id),
+        title: title,
+        summary: summary,
+        status: message.toolStatus ?? '',
+        toolCall: wsService.toolCallFor(
+          wsService.currentSessionKey,
+          message.toolCallId,
         ),
-        child: Row(
-          children: [
-            Icon(icon, size: 14, color: color),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                detail.isEmpty ? title : '$title · $detail',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: isDarkMode ? Colors.grey[300] : Colors.grey[800],
-                ),
-              ),
-            ),
-            if (status.isNotEmpty) ...[
-              const SizedBox(width: 8),
-              Text(
-                _toolStatusLabel(status),
-                style: TextStyle(fontSize: 11, color: color),
-              ),
-            ],
-          ],
-        ),
+        awaitingPermission: wsService.isAwaitingPermission(message.toolCallId),
       ),
     );
   }

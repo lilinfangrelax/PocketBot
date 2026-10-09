@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pocket_bot/config/gateway_config.dart';
 import 'package:pocket_bot/config/session_storage.dart';
 import 'package:pocket_bot/models/message.dart';
@@ -47,7 +48,10 @@ class ConnectionManager extends ChangeNotifier {
   bool get isCheckingStatus => _isCheckingStatus;
   ws.WebSocketService get wsService => _wsService;
 
+  static const _autoApproveKey = 'acp_auto_approve_permissions';
+
   ConnectionManager() : _wsService = ws.WebSocketService() {
+    _loadPreferences();
     _loadSavedGateways().then((_) {
       final last = _gateway;
       if (last == null) return;
@@ -58,6 +62,23 @@ class ConnectionManager extends ChangeNotifier {
       Logger.info('Auto-connecting to saved agent...');
       connectTo(last);
     });
+  }
+
+  Future<void> _loadPreferences() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _wsService.autoApprovePermissions =
+          prefs.getBool(_autoApproveKey) ?? false;
+    } catch (error) {
+      Logger.warning('Could not load ACP preferences: $error');
+    }
+  }
+
+  Future<void> setAutoApprovePermissions(bool value) async {
+    _wsService.autoApprovePermissions = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_autoApproveKey, value);
   }
 
   Future<void> _loadSavedGateways() async {

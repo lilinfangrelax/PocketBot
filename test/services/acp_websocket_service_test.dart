@@ -116,7 +116,7 @@ void main() {
 
   test('auto-allows session/request_permission with allow_once', () async {
     final transport = _FakeAcpTransport();
-    final service = WebSocketService();
+    final service = WebSocketService()..autoApprovePermissions = true;
     addTearDown(() async {
       await service.disconnect();
       await transport.close();
@@ -387,7 +387,7 @@ void main() {
 
   test('allows permission when only optionId uses hyphens', () async {
     final transport = _FakeAcpTransport();
-    final service = WebSocketService();
+    final service = WebSocketService()..autoApprovePermissions = true;
     addTearDown(() async {
       await service.disconnect();
       await transport.close();
@@ -745,6 +745,194 @@ void main() {
     });
     final reply = await transport.waitForResponse('write-1');
     expect(reply['error'], isNotNull);
+  });
+
+  group('permission prompts', () {
+    Map<String, dynamic> permissionRequest(String id) => {
+          'jsonrpc': '2.0',
+          'id': id,
+          'method': 'session/request_permission',
+          'params': {
+            'sessionId': 'session-1',
+            'toolCall': {
+              'toolCallId': 'call-1',
+              'title': 'Run tests',
+              'kind': 'execute',
+              'rawInput': {'command': 'flutter test'},
+            },
+            'options': [
+              {'optionId': 'allow', 'name': 'Allow', 'kind': 'allow_once'},
+              {
+                'optionId': 'always',
+                'name': 'Always allow',
+                'kind': 'allow_always'
+              },
+              {'optionId': 'reject', 'name': 'Reject', 'kind': 'reject_once'},
+            ],
+          },
+        };
+
+    test('waits for the user instead of auto-allowing', () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+
+      await _connectFake(service, transport);
+      transport.push(permissionRequest('perm-1'));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(transport.sent.where((item) => item['id'] == 'perm-1'), isEmpty);
+      final pending = service.permissionsFor('session-1').single;
+      expect(pending.title, 'Run tests');
+      expect(pending.detail, 'flutter test');
+      expect(pending.options.map((o) => o.kind),
+          ['allow_once', 'allow_always', 'reject_once']);
+      expect(service.isAwaitingPermission('call-1'), isTrue);
+      final tool = service.getSession('session-1')!.messages.single;
+      expect(tool.kind, MessageKind.tool);
+
+      service.respondToPermission(pending, 'reject');
+      final reply = await transport.waitForResponse('perm-1');
+      expect(reply['result']['outcome'],
+          {'outcome': 'selected', 'optionId': 'reject'});
+      expect(service.permissionsFor('session-1'), isEmpty);
+      expect(
+        service.getSession('session-1')!.messages.single.toolStatus,
+        'failed',
+      );
+    });
+
+    test('cancelling the turn cancels pending permissions', () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+
+      await _connectFake(service, transport);
+      service.selectSession('session-1');
+      transport.push(permissionRequest('perm-2'));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      service.cancelPrompt();
+      final reply = await transport.waitForResponse('perm-2');
+      expect(reply['result']['outcome'], {'outcome': 'cancelled'});
+      expect(
+        transport.sent.map((item) => item['method']),
+        contains('session/cancel'),
+      );
+    });
+
+    test('turning on auto-approve answers what is already pending', () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+
+      await _connectFake(service, transport);
+      transport.push(permissionRequest('perm-3'));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      service.autoApprovePermissions = true;
+
+      final reply = await transport.waitForResponse('perm-3');
+      expect(reply['result']['outcome']['optionId'], 'allow');
+    });
+  });
+
+  test('keeps the plan per session instead of adding chat messages', () async {
+    final transport = _FakeAcpTransport();
+    final service = WebSocketService();
+    addTearDown(() async {
+      await service.disconnect();
+      await transport.close();
+    });
+
+    await _connectFake(service, transport);
+    transport.push({
+      'jsonrpc': '2.0',
+      'method': 'session/update',
+      'params': {
+        'sessionId': 'session-1',
+        'update': {
+          'sessionUpdate': 'plan',
+          'entries': [
+            {'content': 'Read code', 'status': 'completed', 'priority': 'high'},
+            {'content': 'Fix bug', 'status': 'in_progress', 'priority': 'high'},
+          ],
+        },
+      },
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    final plan = service.planFor('session-1');
+    expect(plan.map((entry) => entry.content), ['Read code', 'Fix bug']);
+    expect(plan.first.isDone, isTrue);
+    expect(plan.last.isActive, isTrue);
+    expect(service.planFor('other'), isEmpty);
+    expect(service.getSession('session-1')!.messages, isEmpty);
+  });
+
+  test('tracks tool call diffs, commands and output', () async {
+    final transport = _FakeAcpTransport();
+    final service = WebSocketService();
+    addTearDown(() async {
+      await service.disconnect();
+      await transport.close();
+    });
+
+    await _connectFake(service, transport);
+    transport.push({
+      'jsonrpc': '2.0',
+      'method': 'session/update',
+      'params': {
+        'sessionId': 'session-1',
+        'update': {
+          'sessionUpdate': 'tool_call',
+          'toolCallId': 'edit-1',
+          'title': 'Edit main.dart',
+          'kind': 'edit',
+          'status': 'in_progress',
+          'rawInput': {'command': 'patch'},
+          'locations': [
+            {'path': '/repo/lib/main.dart', 'line': 3},
+          ],
+          'content': [
+            {
+              'type': 'diff',
+              'path': '/repo/lib/main.dart',
+              'oldText': 'a\nb\n',
+              'newText': 'a\nc\n',
+            },
+          ],
+        },
+      },
+    });
+    transport.push({
+      'jsonrpc': '2.0',
+      'method': 'session/update',
+      'params': {
+        'sessionId': 'session-1',
+        'update': {
+          'sessionUpdate': 'tool_call_update',
+          'toolCallId': 'edit-1',
+          'status': 'completed',
+        },
+      },
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    final call = service.toolCallFor('session-1', 'edit-1')!;
+    expect(call.status, 'completed');
+    expect(call.kind, 'edit');
+    expect(call.command, 'patch');
+    expect(call.locations, ['/repo/lib/main.dart:3']);
+    expect(call.diffs.single.newText, 'a\nc\n');
   });
 }
 

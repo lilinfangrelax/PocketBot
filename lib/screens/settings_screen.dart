@@ -264,6 +264,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const Divider(),
                 ListTile(
+                  leading: const Icon(Icons.verified_user_outlined),
+                  title: const Text('自动允许代理操作'),
+                  subtitle: const Text('关闭时，运行命令、改文件等操作需要你逐个确认'),
+                  trailing: fluent.ToggleSwitch(
+                    checked: context
+                        .watch<ConnectionManager>()
+                        .wsService
+                        .autoApprovePermissions,
+                    onChanged: (value) => context
+                        .read<ConnectionManager>()
+                        .setAutoApprovePermissions(value),
+                  ),
+                ),
+                const Divider(),
+                ListTile(
                   leading: const Icon(Icons.dark_mode),
                   title: const Text('主题'),
                   subtitle: Text(_getThemeName(currentMode)),
