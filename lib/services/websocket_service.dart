@@ -262,6 +262,8 @@ class WebSocketService with ChangeNotifier {
   final Map<String, Completer<Map<String, dynamic>>> _pendingRpc = {};
   final Map<String, String> _pendingPromptSessions = {};
   final Map<String, String> _pendingUserMessages = {};
+  final Map<String, Completer<void>> _promptWaiters = {};
+  final Set<String> _quietSessions = {};
 
   final _messageController = StreamController<Message>.broadcast();
   final _messageUpdateController = StreamController<Message>.broadcast();
@@ -603,6 +605,16 @@ class WebSocketService with ChangeNotifier {
       }
     }
 
+    final waiter = _promptWaiters[id];
+    if (waiter != null && !waiter.isCompleted) {
+      if (message['error'] != null) {
+        final error = _asMap(message['error']);
+        waiter.completeError(
+            Exception('ACP ${error['code']}: ${error['message']}'));
+      } else {
+        waiter.complete();
+      }
+    }
     final sessionKey = _pendingPromptSessions.remove(id);
     final userMessageId = _pendingUserMessages.remove(id);
     if (sessionKey != null) {
@@ -1374,6 +1386,64 @@ class WebSocketService with ChangeNotifier {
     List<Attachment> attachments, {
     String? sessionKey,
   }) async {
+    await _sendPrompt(text, attachments, sessionKey: sessionKey);
+  }
+
+  /// Attaches [sessionKey] to the agent (creating, resuming or loading it)
+  /// and returns the ACP session id it now lives under.
+  Future<String> ensureRemoteSession(String sessionKey) {
+    _requireConnected();
+    return _ensureRemoteSession(sessionKey);
+  }
+
+  /// Sends a prompt without touching the active session and resolves with
+  /// the agent's reply text once the turn ends.
+  Future<String> sendMessageAndWait(
+    String text, {
+    required String sessionKey,
+    Duration timeout = const Duration(minutes: 10),
+  }) async {
+    final remoteKey = await ensureRemoteSession(sessionKey);
+    _quietSessions.add(remoteKey);
+    _sessions.putIfAbsent(remoteKey, () => _newSessionState(remoteKey))
+        .persist = false;
+    final done = Completer<void>();
+    final sent = await _sendPrompt(
+      text,
+      const [],
+      sessionKey: remoteKey,
+      activate: false,
+      waiter: done,
+    );
+    try {
+      await done.future.timeout(timeout);
+    } on TimeoutException {
+      cancelPrompt(sessionKey: sent.sessionKey);
+      rethrow;
+    } finally {
+      _promptWaiters.remove(sent.requestId);
+    }
+    final session = _sessions[sent.sessionKey];
+    if (session == null) return '';
+    final start =
+        session.messages.indexWhere((message) => message.id == sent.userMessageId);
+    return session.messages
+        .skip(start + 1)
+        .where((message) =>
+            !message.isUser &&
+            message.kind == MessageKind.chat &&
+            message.text.trim().isNotEmpty)
+        .map((message) => message.text.trim())
+        .join('\n\n');
+  }
+
+  Future<_SentPrompt> _sendPrompt(
+    String text,
+    List<Attachment> attachments, {
+    String? sessionKey,
+    bool activate = true,
+    Completer<void>? waiter,
+  }) async {
     _requireConnected();
     var selected = sessionKey ?? _activeSessionKey;
     if (selected == null) {
@@ -1384,7 +1454,9 @@ class WebSocketService with ChangeNotifier {
     final remoteKey = await _ensureRemoteSession(selected);
     final session =
         _sessions.putIfAbsent(remoteKey, () => _newSessionState(remoteKey));
-    _activeSessionKey = remoteKey;
+    if (activate || _activeSessionKey == selected) {
+      _activeSessionKey = remoteKey;
+    }
 
     final userMessage = Message(
       id: _generateId(),
@@ -1438,12 +1510,14 @@ class WebSocketService with ChangeNotifier {
     final requestId = _generateId();
     _pendingPromptSessions[requestId] = remoteKey;
     _pendingUserMessages[requestId] = userMessage.id;
+    if (waiter != null) _promptWaiters[requestId] = waiter;
     _sendJson({
       'jsonrpc': '2.0',
       'id': requestId,
       'method': 'session/prompt',
       'params': {'sessionId': remoteKey, 'prompt': prompt},
     });
+    return _SentPrompt(requestId, remoteKey, userMessage.id);
   }
 
   void _handleSessionUpdate(Map<String, dynamic> params) {
@@ -1760,6 +1834,7 @@ class WebSocketService with ChangeNotifier {
         session.updateMessage(message);
         streamingTick.value++;
         if (_activeSessionKey != session.sessionKey &&
+            !_quietSessions.contains(session.sessionKey) &&
             message.text.isNotEmpty) {
           NotificationService().showMessageNotification(
             sessionKey: session.sessionKey,
@@ -1854,6 +1929,9 @@ class WebSocketService with ChangeNotifier {
       if (!completer.isCompleted) completer.completeError(error);
     }
     _pendingRpc.clear();
+    for (final waiter in _promptWaiters.values) {
+      if (!waiter.isCompleted) waiter.completeError(error);
+    }
     _pendingPermissions.clear();
     _pendingPromptSessions.clear();
     _pendingUserMessages.clear();
@@ -1944,4 +2022,12 @@ class WebSocketService with ChangeNotifier {
     streamingTick.dispose();
     super.dispose();
   }
+}
+
+class _SentPrompt {
+  final String requestId;
+  final String sessionKey;
+  final String userMessageId;
+
+  const _SentPrompt(this.requestId, this.sessionKey, this.userMessageId);
 }

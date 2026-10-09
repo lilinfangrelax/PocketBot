@@ -18,6 +18,10 @@ class SessionState with ChangeNotifier {
   String? customTitle;  // User-defined title that persists
   String? model;  // Model name from Gateway
 
+  /// False for sessions that back a group chat member; they are stored with
+  /// the group's messages instead of the chat list.
+  bool persist = true;
+
   /// Get the display title for this session (public getter)
   /// 优先返回自定义标题，如果没有则根据消息生成
   String get displayTitle {
@@ -175,6 +179,7 @@ class SessionState with ChangeNotifier {
   }
 
   Future<void> _saveToStorage() async {
+    if (!persist) return;
     try {
       Logger.debug('[Session] Saving to storage: ${sessionKey}, ${messages.length} messages');
       await SessionStorage.saveSession(toChatSession());

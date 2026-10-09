@@ -1003,6 +1003,70 @@ void main() {
       },
     ]);
   });
+
+  test('sendMessageAndWait answers in a background session', () async {
+    final transport = _FakeAcpTransport();
+    final service = WebSocketService();
+    addTearDown(() async {
+      await service.disconnect();
+      await transport.close();
+    });
+    await _connectFake(service, transport);
+
+    final creating = service.createGatewaySession('Group');
+    await transport.waitForMethod('session/new');
+    transport.respondToLast({'sessionId': 'group-session'});
+    final session = await creating;
+
+    final reply = service.sendMessageAndWait('Hi all', sessionKey: session.key);
+    final prompt = await transport.waitForMethod('session/prompt');
+    expect(prompt['params']['sessionId'], 'group-session');
+    transport.push({
+      'jsonrpc': '2.0',
+      'method': 'session/update',
+      'params': {
+        'sessionId': 'group-session',
+        'update': {
+          'sessionUpdate': 'agent_message_chunk',
+          'messageId': 'm1',
+          'content': {'type': 'text', 'text': 'Hello group'},
+        },
+      },
+    });
+    transport.respondToLast({'stopReason': 'end_turn'});
+
+    expect(await reply.timeout(const Duration(seconds: 2)), 'Hello group');
+    expect(service.currentSessionKey, isNot('group-session'));
+    expect(service.getSession('group-session')?.persist, isFalse);
+  });
+
+  test('sendMessageAndWait fails when the prompt errors', () async {
+    final transport = _FakeAcpTransport();
+    final service = WebSocketService();
+    addTearDown(() async {
+      await service.disconnect();
+      await transport.close();
+    });
+    await _connectFake(service, transport);
+
+    final creating = service.createGatewaySession('Group');
+    await transport.waitForMethod('session/new');
+    transport.respondToLast({'sessionId': 'group-session'});
+    await creating;
+
+    final reply = service.sendMessageAndWait('Hi', sessionKey: 'group-session');
+    final prompt = await transport.waitForMethod('session/prompt');
+    transport.push({
+      'jsonrpc': '2.0',
+      'id': prompt['id'],
+      'error': {'code': -32603, 'message': 'boom'},
+    });
+
+    await expectLater(
+      reply.timeout(const Duration(seconds: 2)),
+      throwsA(anything),
+    );
+  });
 }
 
 Future<void> _connectFake(
