@@ -283,6 +283,12 @@ Future<String> execRemote(SSHClient client, String command) async {
   ]);
   await session.done;
   final out = stdout.toString();
+  if (Logger.isVerbose) {
+    Logger.debug('[remote] exec exit=${session.exitCode} '
+        'cmd=${_commandForLog(command)}\n'
+        'stdout: ${out.trim()}\n'
+        'stderr: ${cleanRemoteStderr(stderr.toString()).trim()}');
+  }
   if ((session.exitCode ?? 1) != 0 && out.trim().isEmpty) {
     final err = cleanRemoteStderr(stderr.toString()).trim();
     throw Exception(
@@ -290,6 +296,11 @@ Future<String> execRemote(SSHClient client, String command) async {
     );
   }
   return out;
+}
+
+String _commandForLog(String command) {
+  final oneLine = command.replaceAll(RegExp(r'\s+'), ' ');
+  return oneLine.length <= 300 ? oneLine : '${oneLine.substring(0, 300)}…';
 }
 
 /// Windows PowerShell writes progress and errors to a redirected stderr as

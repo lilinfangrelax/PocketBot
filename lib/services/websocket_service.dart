@@ -14,6 +14,7 @@ import 'package:pocket_bot/services/acp_transport.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
 import 'package:pocket_bot/services/notification_service.dart';
 import 'package:pocket_bot/utils/acp_stream_text.dart';
+import 'package:pocket_bot/utils/debug_log.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -573,8 +574,9 @@ class WebSocketService with ChangeNotifier {
     final highFrequency = method == 'session/update' &&
         _isStreamingUpdate(_asMap(message['params']));
     if (!highFrequency) {
-      Logger.debug(
-          '[ACP] Received method=$method id=${message['id']}');
+      if (Logger.isVerbose) {
+        Logger.debug('[ACP] <<< ${_frameForLog(jsonEncode(message))}');
+      }
       _eventController.add(message);
     }
 
@@ -1050,8 +1052,13 @@ class WebSocketService with ChangeNotifier {
   }
 
   void _sendJson(Map<String, dynamic> value) {
-    _transport?.send(jsonEncode(value));
+    final frame = jsonEncode(value);
+    if (Logger.isVerbose) Logger.debug('[ACP] >>> ${_frameForLog(frame)}');
+    _transport?.send(frame);
   }
+
+  static String _frameForLog(String frame) =>
+      DebugLog.truncate(frame, 1500);
 
   void selectSession(String sessionKey, {String? agentId}) {
     activeSession?.deactivate();

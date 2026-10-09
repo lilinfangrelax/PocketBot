@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:ui' show PlatformDispatcher;
 import 'package:fluent_ui/fluent_ui.dart';
 import 'package:flutter/material.dart' as material;
 import 'package:provider/provider.dart';
@@ -12,6 +14,7 @@ import 'package:pocket_bot/services/github_update_service.dart';
 import 'package:pocket_bot/services/notification_service.dart';
 import 'package:pocket_bot/services/ssh_host_keys.dart';
 import 'package:pocket_bot/services/websocket_service.dart';
+import 'package:pocket_bot/utils/debug_log.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/utils/version_utils.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
@@ -37,8 +40,12 @@ final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  _installErrorHandlers();
 
+  await DebugLog.instance.init();
   await AppVersion.init();
+  Logger.info('[App] PocketBot ${AppVersion.fullVersion} started on '
+      '${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
   await UpdateConfig.load();
   SshHostKeys.prompt = hostKeyPromptFor(appNavigatorKey);
 
@@ -63,6 +70,21 @@ Future<void> main() async {
       child: const PocketBotApp(),
     ),
   );
+}
+
+void _installErrorHandlers() {
+  FlutterError.onError = (details) {
+    Logger.error(
+      '[Flutter] ${details.exceptionAsString()}',
+      details.context?.toDescription(),
+      details.stack,
+    );
+    FlutterError.presentError(details);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    Logger.error('[Uncaught]', error, stack);
+    return true;
+  };
 }
 
 Future<void> _initNotifications() async {

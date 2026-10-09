@@ -63,6 +63,8 @@ class SshHostPool extends ChangeNotifier {
 
   Future<SSHClient> _connect(String id, GatewayInfo host) async {
     _set(id, const HostState(HostStatus.checking));
+    final started = DateTime.now();
+    Logger.debug('[SSH] Logging in to ${host.hostLabel}');
     try {
       final client = await _open(host);
       if (_disposed) {
@@ -70,6 +72,8 @@ class SshHostPool extends ChangeNotifier {
         throw StateError('SSH host pool closed');
       }
       _clients[id] = client;
+      Logger.info('[SSH] ${host.hostLabel} online '
+          '(${DateTime.now().difference(started).inMilliseconds} ms)');
       _set(id, HostState(HostStatus.online, checkedAt: DateTime.now()));
       client.done.then(
         (_) => _dropped(id, client),
@@ -77,6 +81,7 @@ class SshHostPool extends ChangeNotifier {
       );
       return client;
     } catch (error) {
+      Logger.warning('[SSH] ${host.hostLabel} login failed', error);
       _set(
         id,
         HostState(
@@ -109,8 +114,7 @@ class SshHostPool extends ChangeNotifier {
     try {
       await client(host);
       return true;
-    } catch (error) {
-      Logger.debug('[SSH] ${host.hostLabel} offline: $error');
+    } catch (_) {
       return false;
     }
   }

@@ -236,6 +236,8 @@ class ConnectionManager extends ChangeNotifier {
       ..mcpServers = _wsService.mcpServers;
     _pool[key] = service;
     notifyListeners();
+    Logger.info('[Pool] Starting ${profile.displayLabel} '
+        'agent=${profile.agentId} cwd=${profile.workingDirectory} key=$key');
     try {
       var prepared = profile;
       if (profile.kind == AgentTransportKind.local &&
@@ -247,10 +249,13 @@ class ConnectionManager extends ChangeNotifier {
           workingDirectory: await _absoluteRemoteDirectory(profile),
         );
       }
+      Logger.debug('[Pool] Launch ${prepared.kind.name} '
+          'command=${prepared.command} cwd=${prepared.workingDirectory}');
       await service.connectTarget(prepared);
       Logger.info('Pooled connection ready: ${profile.displayLabel}');
       return service;
-    } catch (error) {
+    } catch (error, stack) {
+      Logger.error('[Pool] ${profile.displayLabel} failed', error, stack);
       final message = service.errorMessage ??
           error.toString().replaceFirst('Exception: ', '');
       throw Exception(message);

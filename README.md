@@ -47,6 +47,16 @@ flutter test
 
 See [ACP testing](docs/ACP_TESTING.md) for the expected JSON-RPC flow.
 
+### Debug logs
+
+Settings → 调试 → 调试模式 turns on verbose logging: SSH logins, remote
+commands, agent launches and every ACP JSON-RPC frame (streaming chunks are
+skipped). Info, warnings, errors and uncaught exceptions are always recorded.
+Logs are kept in memory (last 2000 entries) and in
+`<app support>/logs/pocketbot.log` (rotated at 1 MB). Open 查看日志 to search,
+filter, copy or export them. Passwords, tokens, private keys and MCP env/header
+values are masked before anything is stored.
+
 ## Security
 
 - Prefer SSH keys over passwords when connecting to remote hosts.
