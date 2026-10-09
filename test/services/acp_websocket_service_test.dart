@@ -1040,6 +1040,74 @@ void main() {
     expect(service.getSession('group-session')?.persist, isFalse);
   });
 
+  test('background sessions open in their own folder', () async {
+    final transport = _FakeAcpTransport();
+    final service = WebSocketService();
+    addTearDown(() async {
+      await service.disconnect();
+      await transport.close();
+    });
+    final initialized =
+        service.connectWithTransport(transport, workingDirectory: '/home/me');
+    await transport.waitForMethod('initialize');
+    transport.respondToLast({
+      'protocolVersion': 1,
+      'agentCapabilities': {'loadSession': true},
+      'authMethods': <dynamic>[],
+    });
+    await initialized;
+
+    final repo = service.createGatewaySession('Repo', cwd: '/srv/repo');
+    final repoNew = await transport.waitForMethod('session/new');
+    expect(repoNew['params']['cwd'], '/srv/repo');
+    transport.respondToLast({'sessionId': 's-repo'});
+    await repo;
+
+    final plain = service.createGatewaySession('Plain');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    final plainNew = transport.sent.last;
+    expect(plainNew['method'], 'session/new');
+    expect(plainNew['params']['cwd'], '/home/me');
+    transport.respondToLast({'sessionId': 's-plain'});
+    await plain;
+
+    expect(service.workingDirectoryFor('s-repo'), '/srv/repo');
+    expect(service.workingDirectoryFor('s-plain'), '/home/me');
+    expect(service.workingDirectoryFor('unknown'), '/home/me');
+
+    final loading = service.ensureRemoteSession('saved', cwd: '/srv/other');
+    final load = await transport.waitForMethod('session/load');
+    expect(load['params']['sessionId'], 'saved');
+    expect(load['params']['cwd'], '/srv/other');
+    transport.respondToLast(<String, dynamic>{});
+    expect(await loading, 'saved');
+  });
+
+  test('file reads resolve against the session folder', () async {
+    final fs = _MemoryFileSystem({'/srv/repo/a.txt': 'repo file'});
+    final transport = _FakeAcpTransport(fileSystem: fs);
+    final service = WebSocketService();
+    addTearDown(() async {
+      await service.disconnect();
+      await transport.close();
+    });
+    await _connectFake(service, transport);
+
+    final creating = service.createGatewaySession('Repo', cwd: '/srv/repo');
+    await transport.waitForMethod('session/new');
+    transport.respondToLast({'sessionId': 's-repo'});
+    await creating;
+
+    transport.push({
+      'jsonrpc': '2.0',
+      'id': 'read-1',
+      'method': 'fs/read_text_file',
+      'params': {'sessionId': 's-repo', 'path': 'a.txt'},
+    });
+    final response = await transport.waitForResponse('read-1');
+    expect(response['result'], {'content': 'repo file'});
+  });
+
   test('sendMessageAndWait fails when the prompt errors', () async {
     final transport = _FakeAcpTransport();
     final service = WebSocketService();
