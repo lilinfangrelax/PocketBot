@@ -94,8 +94,8 @@ class FluentColors {
     return FluentColors(
       brightness: brightness,
       background: isDark ? const Color(0xFF202020) : const Color(0xFFF3F3F3),
-      chrome: isDark ? const Color(0xFF1C1C1C) : const Color(0xFFF3F3F3),
-      card: isDark ? const Color(0xFF2C2C2C) : const Color(0xFFFFFFFF),
+      chrome: isDark ? const Color(0xFF1C1C1C) : const Color(0xFFFBFBFB),
+      card: isDark ? const Color(0xFF2B2B2B) : const Color(0xFFFFFFFF),
       control: isDark ? const Color(0xFF2D2D2D) : const Color(0xFFFFFFFF),
       stroke: isDark ? const Color(0x22FFFFFF) : const Color(0x14000000),
       strokeStrong: isDark ? const Color(0x33FFFFFF) : const Color(0x29000000),
@@ -129,10 +129,17 @@ FluentThemeData buildFluentTheme(Brightness brightness) {
     scaffoldBackgroundColor:
         isLight ? const Color(0xFFF3F3F3) : const Color(0xFF202020),
     micaBackgroundColor:
-        isLight ? const Color(0xFFF3F3F3) : const Color(0xFF1C1C1C),
-    cardColor: isLight ? const Color(0xFFFFFFFF) : const Color(0xFF2C2C2C),
+        isLight ? const Color(0xFFFBFBFB) : const Color(0xFF1C1C1C),
+    cardColor: isLight ? const Color(0xFFFFFFFF) : const Color(0xFF2B2B2B),
     acrylicBackgroundColor:
         isLight ? const Color(0xFFF9F9F9) : const Color(0xFF2C2C2C),
+    buttonTheme: const ButtonThemeData(
+      // Phone touch targets: 18px glyph with 10px padding is a 38px hit box.
+      iconButtonStyle: ButtonStyle(
+        iconSize: WidgetStatePropertyAll(18),
+        padding: WidgetStatePropertyAll(EdgeInsetsDirectional.all(10)),
+      ),
+    ),
   );
 }
 
@@ -219,6 +226,8 @@ material.ThemeData buildMaterialTheme(Brightness brightness) {
     cardTheme: material.CardThemeData(
       color: colors.card,
       elevation: 0,
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
       surfaceTintColor: material.Colors.transparent,
       shape: overlayShape,
     ),
@@ -280,10 +289,41 @@ material.ThemeData buildMaterialTheme(Brightness brightness) {
             material.BorderRadius.circular(FluentColors.overlayRadius),
       ),
     ),
-    dividerTheme: const material.DividerThemeData(thickness: 1, space: 1),
+    dividerTheme: material.DividerThemeData(
+      color: colors.stroke,
+      thickness: 1,
+      space: 1,
+    ),
     listTileTheme: material.ListTileThemeData(
       iconColor: colors.textSecondary,
       textColor: colors.textPrimary,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+      horizontalTitleGap: 14,
+      minLeadingWidth: 24,
+      minVerticalPadding: 10,
+      titleTextStyle: textTheme.bodyLarge?.copyWith(
+        fontSize: 15,
+        height: 1.35,
+        color: colors.textPrimary,
+      ),
+      subtitleTextStyle: textTheme.bodyMedium?.copyWith(
+        fontSize: 13,
+        height: 1.35,
+        color: colors.textSecondary,
+      ),
+      leadingAndTrailingTextStyle: textTheme.bodyMedium?.copyWith(
+        fontSize: 13,
+        color: colors.textSecondary,
+      ),
+    ),
+    chipTheme: material.ChipThemeData(
+      backgroundColor: colors.control,
+      side: material.BorderSide(color: colors.stroke),
+      labelStyle: textTheme.labelMedium?.copyWith(color: colors.textSecondary),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      shape: material.RoundedRectangleBorder(
+        borderRadius: material.BorderRadius.circular(FluentColors.radius),
+      ),
     ),
     switchTheme: material.SwitchThemeData(
       thumbColor: material.WidgetStateProperty.resolveWith((states) {

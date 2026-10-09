@@ -3,18 +3,21 @@ import 'package:pocket_bot/screens/contacts_screen.dart';
 import 'package:pocket_bot/screens/home_screen.dart';
 import 'package:pocket_bot/screens/settings_screen.dart';
 import 'package:pocket_bot/screens/wechat_session_list.dart';
+import 'package:pocket_bot/widgets/fluent_tab_bar.dart';
 
 class MainScreen extends StatefulWidget {
-  const MainScreen({super.key});
+  const MainScreen({super.key, this.initialIndex = 0});
+
+  final int initialIndex;
 
   @override
   State<MainScreen> createState() => _MainScreenState();
 }
 
 class _MainScreenState extends State<MainScreen> {
-  int _currentIndex = 0;
+  late int _currentIndex = widget.initialIndex;
 
-  // IndexedStack keeps each tab alive across NavigationView changes.
+  // IndexedStack keeps each tab alive across tab changes.
   final List<Widget> _pages = const [
     WeChatSessionList(),
     ContactsScreen(),
@@ -22,46 +25,35 @@ class _MainScreenState extends State<MainScreen> {
     SettingsScreen(),
   ];
 
+  static const _tabs = [
+    FluentTab(icon: WindowsIcons.chat_bubbles, label: '消息'),
+    FluentTab(icon: WindowsIcons.people, label: '通讯录'),
+    FluentTab(icon: WindowsIcons.robot, label: '发现'),
+    FluentTab(icon: WindowsIcons.contact, label: '我'),
+  ];
+
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: NavigationView(
-        pane: NavigationPane(
-          selected: _currentIndex,
-          onChanged: (index) => setState(() => _currentIndex = index),
-          displayMode: PaneDisplayMode.top,
-          toggleButton: null,
-          indicator: const StickyNavigationIndicator(),
-          items: [
-            PaneItem(
-              icon: const Icon(WindowsIcons.chat_bubbles),
-              title: const Text('消息'),
-              body: const SizedBox.shrink(),
+    return ColoredBox(
+      color: FluentTheme.of(context).scaffoldBackgroundColor,
+      child: Column(
+        children: [
+          Expanded(
+            child: SafeArea(
+              bottom: false,
+              child: IndexedStack(
+                key: const ValueKey('pocketbot-tabs'),
+                index: _currentIndex,
+                children: _pages,
+              ),
             ),
-            PaneItem(
-              icon: const Icon(WindowsIcons.people),
-              title: const Text('通讯录'),
-              body: const SizedBox.shrink(),
-            ),
-            PaneItem(
-              icon: const Icon(WindowsIcons.globe),
-              title: const Text('发现'),
-              body: const SizedBox.shrink(),
-            ),
-            PaneItem(
-              icon: const Icon(WindowsIcons.settings),
-              title: const Text('我'),
-              body: const SizedBox.shrink(),
-            ),
-          ],
-        ),
-        paneBodyBuilder: (item, body) {
-          return IndexedStack(
-            key: const ValueKey('pocketbot-tabs'),
-            index: _currentIndex,
-            children: _pages,
-          );
-        },
+          ),
+          FluentTabBar(
+            tabs: _tabs,
+            selected: _currentIndex,
+            onChanged: (index) => setState(() => _currentIndex = index),
+          ),
+        ],
       ),
     );
   }

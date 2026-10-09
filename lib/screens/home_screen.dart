@@ -200,11 +200,12 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: () => manager.disconnect(),
               icon: const Icon(Icons.link_off, size: 18),
               label: const Text('断开'),
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              style: TextButton.styleFrom(
+                  foregroundColor: FluentColors.of(context).danger),
             ),
           ],
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
         _buildGatewayList(manager),
       ],
     );
@@ -222,7 +223,7 @@ class _HomeScreenState extends State<HomeScreen> {
           subText: gateway?.displayLabel,
           showProgress: true,
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
         _buildGatewayList(manager),
       ],
     );
@@ -268,7 +269,6 @@ class _HomeScreenState extends State<HomeScreen> {
         _buildLaunchLocal(manager),
         const SizedBox(height: 16),
         _buildGatewayList(manager),
-        const SizedBox(height: 16),
         _buildSshConnection(manager),
       ],
     );
@@ -280,7 +280,7 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         _buildStatusBar(
           icon: Icons.computer,
-          color: Colors.grey,
+          color: FluentColors.of(context).textSecondary,
           text: '未连接',
           subText: '从 ACP Registry 选择代理，本机或 SSH 启动',
         ),
@@ -288,9 +288,8 @@ class _HomeScreenState extends State<HomeScreen> {
         _buildAgentPicker(),
         const SizedBox(height: 16),
         _buildLaunchLocal(manager),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
         _buildGatewayList(manager),
-        const SizedBox(height: 24),
         _buildSshConnection(manager),
       ],
     );
@@ -303,7 +302,7 @@ class _HomeScreenState extends State<HomeScreen> {
           padding: const EdgeInsets.all(16),
           child: Text(
             '本机 Cursor Agent 仅支持桌面端。手机请用下方 SSH 连接到已安装 agent 的电脑。',
-            style: TextStyle(color: Colors.grey[700]),
+            style: TextStyle(color: FluentColors.of(context).textSecondary),
           ),
         ),
       );
@@ -323,7 +322,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Text(
               '在这台电脑上启动所选 ACP 代理。Cursor 需要先运行 agent login。',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.grey[600],
+                    color: FluentColors.of(context).textSecondary,
                   ),
             ),
             const SizedBox(height: 12),
@@ -428,12 +427,13 @@ class _HomeScreenState extends State<HomeScreen> {
     List<Widget>? actions,
     bool showProgress = false,
   }) {
+    final colors = FluentColors.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.3)),
+        color: colors.card,
+        borderRadius: BorderRadius.circular(FluentColors.overlayRadius),
+        border: Border.all(color: colors.stroke),
       ),
       child: Row(
         children: [
@@ -451,13 +451,25 @@ class _HomeScreenState extends State<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(text,
-                    style:
-                        TextStyle(color: color, fontWeight: FontWeight.w500)),
+                Text(
+                  text,
+                  style: TextStyle(
+                    color: colors.textPrimary,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 if (subText != null)
-                  Text(subText,
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      subText,
                       style: TextStyle(
-                          color: color.withOpacity(0.7), fontSize: 12)),
+                        color: colors.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -489,11 +501,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          '已保存的连接',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        const SizedBox(height: 8),
+        const FluentSectionHeader('已保存的连接'),
         ...allGateways.map((gw) {
           final isConnected = manager.gateway != null &&
               manager.gateway!.connectionId == gw.connectionId;
@@ -517,6 +525,7 @@ class _HomeScreenState extends State<HomeScreen> {
             onDelete: () => _confirmDeleteGateway(context, manager, gw),
           );
         }),
+        const SizedBox(height: 8),
       ],
     );
   }
@@ -536,7 +545,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Text(
               '登录后会把 pocketbot-remote 装到远程的 ~/.pocketbot，再启动 $_agentLabel。断线后代理进程还在，重连会接回去。',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.grey[600],
+                    color: FluentColors.of(context).textSecondary,
                   ),
             ),
             const SizedBox(height: 12),
@@ -883,11 +892,12 @@ class _GatewayListTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = FluentColors.of(context);
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: InkWell(
         onTap: onEdit,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(FluentColors.overlayRadius),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(
@@ -897,8 +907,8 @@ class _GatewayListTile extends StatelessWidget {
                 height: 10,
                 decoration: BoxDecoration(
                   color: isConnected
-                      ? Colors.green
-                      : (isOnline ? Colors.blue : Colors.grey),
+                      ? colors.success
+                      : (isOnline ? colors.info : colors.textTertiary),
                   shape: BoxShape.circle,
                 ),
               ),
@@ -906,7 +916,7 @@ class _GatewayListTile extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).primaryColor.withOpacity(0.1),
+                  color: colors.accentSubtle,
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
@@ -914,7 +924,7 @@ class _GatewayListTile extends StatelessWidget {
                       ? Icons.computer
                       : Icons.lan,
                   size: 18,
-                  color: Theme.of(context).primaryColor,
+                  color: colors.accent,
                 ),
               ),
               const SizedBox(width: 12),
@@ -929,7 +939,7 @@ class _GatewayListTile extends StatelessWidget {
                     Text(
                       gateway.displayLabel,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Colors.grey[600],
+                            color: colors.textSecondary,
                           ),
                     ),
                   ],
@@ -940,12 +950,12 @@ class _GatewayListTile extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.green.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
+                    color: colors.success.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(FluentColors.radius),
                   ),
-                  child: const Text(
+                  child: Text(
                     '已连接',
-                    style: TextStyle(fontSize: 12, color: Colors.green),
+                    style: TextStyle(fontSize: 12, color: colors.success),
                   ),
                 )
               else if (isConnecting)
@@ -963,7 +973,7 @@ class _GatewayListTile extends StatelessWidget {
               IconButton(
                 icon: const Icon(Icons.delete_outline, size: 20),
                 onPressed: onDelete,
-                color: Colors.grey,
+                color: colors.textSecondary,
                 tooltip: '删除',
               ),
             ],
