@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:pocket_bot/models/group_chat.dart';
 import 'package:pocket_bot/services/group_chat_service.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
+import 'package:pocket_bot/theme/fluent_theme.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/widgets/chat_bubble_widget.dart';
 
@@ -20,7 +21,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   final GroupChatService _groupChatService = GroupChatService();
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  
+
   GroupChat? _group;
   List<GroupMessage> _messages = [];
   bool _isLoading = true;
@@ -54,7 +55,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         (g) => g.id == widget.groupId,
         orElse: () => throw Exception('群聊不存在'),
       );
-      
+
       // 获取群消息
       _messages = await _groupChatService.getGroupMessages(widget.groupId);
       _messages = _messages.reversed.toList(); // 按时间正序排列
@@ -118,12 +119,12 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   void _simulateAIResponse() async {
     // 显示正在输入
     setState(() => _isTyping = true);
-    
+
     // 模拟延迟
     await Future.delayed(const Duration(seconds: 2));
-    
+
     if (!mounted) return;
-    
+
     // 创建 AI 消息
     final aiMessage = GroupMessage(
       id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
@@ -176,20 +177,12 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   @override
   Widget build(BuildContext context) {
     final bool isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final colors = FluentColors.of(context);
     final messageItems = _buildMessageItems();
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: isDarkMode ? const Color(0xFF191919) : const Color(0xFFEDEDED),
-        elevation: isDarkMode ? 0 : 0.5,
-        title: Text(
-          _group?.name ?? '群聊',
-          style: TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w500,
-            color: isDarkMode ? Colors.white : Colors.black87,
-          ),
-        ),
+        title: Text(_group?.name ?? '群聊'),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -198,7 +191,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                 // 消息列表
                 Expanded(
                   child: Container(
-                    color: isDarkMode ? const Color(0xFF191919) : const Color(0xFFF5F5F5),
+                    color: colors.background,
                     child: _messages.isEmpty
                         ? _buildEmptyState(isDarkMode)
                         : GestureDetector(
@@ -212,13 +205,16 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                                 if (item['type'] == 'time') {
                                   return TimeDivider(time: item['time']);
                                 } else {
-                                  final message = item['message'] as GroupMessage;
-                                  final isMe = message.senderId == _currentUserId;
+                                  final message =
+                                      item['message'] as GroupMessage;
+                                  final isMe =
+                                      message.senderId == _currentUserId;
                                   return ChatBubbleWidget(
                                     content: message.content,
                                     isUser: isMe,
                                     isDarkMode: isDarkMode,
-                                    senderName: isMe ? null : message.senderName,
+                                    senderName:
+                                        isMe ? null : message.senderName,
                                     senderAvatar: message.senderAvatar,
                                     currentUserId: _currentUserId,
                                     messageId: message.id,
@@ -231,8 +227,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                 ),
 
                 // 打字指示器
-                if (_isTyping)
-                  TypingIndicator(isDarkMode: isDarkMode),
+                if (_isTyping) TypingIndicator(isDarkMode: isDarkMode),
 
                 // 输入框
                 _buildInputBar(isDarkMode),
@@ -242,8 +237,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   }
 
   Widget _buildEmptyState(bool isDarkMode) {
+    final colors = FluentColors.of(context);
     return Container(
-      color: isDarkMode ? const Color(0xFF191919) : const Color(0xFFF5F5F5),
+      color: colors.background,
       child: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -251,8 +247,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: isDarkMode ? const Color(0xFF2E2E2E) : Colors.white,
-                borderRadius: BorderRadius.circular(12),
+                color: colors.card,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: colors.stroke),
               ),
               child: Icon(
                 Icons.group_outlined,
@@ -275,8 +272,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   }
 
   Widget _buildInputBar(bool isDarkMode) {
+    final colors = FluentColors.of(context);
     return Container(
-      color: isDarkMode ? const Color(0xFF191919) : const Color(0xFFF7F7F7),
+      color: colors.chrome,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       child: SafeArea(
         child: Row(
@@ -287,11 +285,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
               child: Container(
                 constraints: const BoxConstraints(maxHeight: 100),
                 decoration: BoxDecoration(
-                  color: isDarkMode ? const Color(0xFF2E2E2E) : Colors.white,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(
-                    color: isDarkMode ? Colors.grey[700]! : Colors.grey[300]!,
-                  ),
+                  color: colors.control,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: colors.strokeStrong),
                 ),
                 child: TextField(
                   controller: _messageController,
@@ -324,7 +320,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             IconButton(
               onPressed: _messageController.text.trim().isEmpty
                   ? null // TODO: 展开更多菜单
-                  : _isSending ? null : _sendMessage,
+                  : _isSending
+                      ? null
+                      : _sendMessage,
               icon: _isSending
                   ? const SizedBox(
                       width: 20,
@@ -339,16 +337,18 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                     ),
               style: IconButton.styleFrom(
                 backgroundColor: _messageController.text.isNotEmpty
-                    ? const Color(0xFF07C160)
+                    ? colors.accent
                     : Colors.transparent,
                 foregroundColor: _messageController.text.isNotEmpty
-                    ? Colors.white
-                    : isDarkMode ? Colors.grey[400] : Colors.grey[600],
+                    ? colors.onAccent
+                    : colors.textSecondary,
                 side: BorderSide(
                   color: _messageController.text.isEmpty
-                      ? (isDarkMode ? Colors.grey[700]! : Colors.grey[400]!)
+                      ? colors.strokeStrong
                       : Colors.transparent,
-                  width: 1,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(4),
                 ),
               ),
               constraints: const BoxConstraints.tightFor(width: 36, height: 36),

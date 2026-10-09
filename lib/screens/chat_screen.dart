@@ -9,6 +9,7 @@ import 'package:pocket_bot/main.dart';
 import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/services/websocket_service.dart';
+import 'package:pocket_bot/theme/fluent_theme.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/widgets/attachment_widget.dart';
 import 'package:pocket_bot/widgets/markdown_message_widget.dart';
@@ -191,8 +192,8 @@ class _ChatScreenState extends State<ChatScreen> {
               onTap: () {
                 _controller.value = TextEditingValue(
                   text: '/${command.name} ',
-                  selection: TextSelection.collapsed(
-                      offset: command.name.length + 2),
+                  selection:
+                      TextSelection.collapsed(offset: command.name.length + 2),
                 );
               },
             ),
@@ -433,8 +434,7 @@ class _ChatScreenState extends State<ChatScreen> {
           );
         }
       } else {
-        children.add(
-            _buildConfigOptionControl(option, wsService, isDarkMode));
+        children.add(_buildConfigOptionControl(option, wsService, isDarkMode));
       }
     }
     return Wrap(
@@ -978,6 +978,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final connectionManager = context.watch<ConnectionManager>();
     final wsService = connectionManager.wsService;
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final colors = FluentColors.of(context);
     // 气泡最大宽度：屏幕宽度减去两个头像、边距及气泡间隔的距离
     // 头像 margin 8 + 宽度 40 + margin 8 = 56
     // 气泡与头像间隔：8
@@ -986,20 +987,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor:
-            isDarkMode ? const Color(0xFF191919) : const Color(0xFFEDEDED),
-        elevation: isDarkMode ? 0 : 0.5,
-        title: Center(
-          child: Text(
-            wsService.activeSession?.customTitle?.isNotEmpty == true
-                ? wsService.activeSession!.customTitle!
-                : 'PocketBot',
-            style: TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w500,
-              color: isDarkMode ? Colors.white : Colors.black87,
-            ),
-          ),
+        title: Text(
+          wsService.activeSession?.customTitle?.isNotEmpty == true
+              ? wsService.activeSession!.customTitle!
+              : 'PocketBot',
         ),
       ),
       body: Column(
@@ -1011,16 +1002,16 @@ class _ChatScreenState extends State<ChatScreen> {
           if (!connectionManager.wsService.isConnected &&
               !connectionManager.wsService.isReconnecting)
             Container(
-              color: const Color(0xFFFA9D3B),
+              color: colors.warningSurface,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Row(
                 children: [
-                  const Icon(Icons.info_outline, color: Colors.white, size: 18),
+                  Icon(Icons.info_outline, color: colors.warning, size: 18),
                   const SizedBox(width: 8),
-                  const Expanded(
+                  Expanded(
                     child: Text(
                       '连接已断开，请重新连接 Agent',
-                      style: TextStyle(color: Colors.white, fontSize: 13),
+                      style: TextStyle(color: colors.textPrimary, fontSize: 13),
                     ),
                   ),
                   TextButton(
@@ -1029,12 +1020,6 @@ class _ChatScreenState extends State<ChatScreen> {
                         connectionManager.connectTo(connectionManager.gateway!);
                       }
                     },
-                    style: TextButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 4),
-                      backgroundColor: Colors.white.withValues(alpha: 0.2),
-                    ),
                     child: const Text('重连'),
                   ),
                 ],
@@ -1044,16 +1029,16 @@ class _ChatScreenState extends State<ChatScreen> {
           // Auto-reconnect countdown banner
           if (connectionManager.wsService.isReconnecting)
             Container(
-              color: const Color(0xFF2196F3),
+              color: colors.infoSurface,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Row(
                 children: [
-                  const Icon(Icons.sync, color: Colors.white, size: 18),
+                  Icon(Icons.sync, color: colors.info, size: 18),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       '自动重连中 ${connectionManager.wsService.reconnectCountdown} 秒...',
-                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                      style: TextStyle(color: colors.textPrimary, fontSize: 13),
                     ),
                   ),
                 ],
@@ -1063,9 +1048,7 @@ class _ChatScreenState extends State<ChatScreen> {
           // Messages with WeChat-style background
           Expanded(
             child: Container(
-              color: isDarkMode
-                  ? const Color(0xFF191919)
-                  : const Color(0xFFF5F5F5),
+              color: colors.background,
               child: _messages.isEmpty
                   ? _buildEmptyState(isDarkMode)
                   : GestureDetector(
@@ -1119,18 +1102,9 @@ class _ChatScreenState extends State<ChatScreen> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 16, vertical: 10),
                       decoration: BoxDecoration(
-                        color:
-                            isDarkMode ? const Color(0xFF2E2E2E) : Colors.white,
-                        borderRadius: const BorderRadius.only(
-                          topLeft: Radius.circular(6),
-                          topRight: Radius.circular(6),
-                          bottomRight: Radius.circular(6),
-                          bottomLeft: Radius.circular(2),
-                        ),
-                        border: Border.all(
-                            color: isDarkMode
-                                ? Colors.grey[700]!
-                                : Colors.grey[300]!),
+                        color: colors.card,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: colors.stroke),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -1147,8 +1121,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
           // Input area - WeChat style bottom input bar
           Container(
-            color:
-                isDarkMode ? const Color(0xFF191919) : const Color(0xFFF7F7F7),
+            color: colors.chrome,
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             child: SafeArea(
               child: Column(
@@ -1171,14 +1144,9 @@ class _ChatScreenState extends State<ChatScreen> {
                         child: Container(
                           constraints: const BoxConstraints(maxHeight: 100),
                           decoration: BoxDecoration(
-                            color: isDarkMode
-                                ? const Color(0xFF2E2E2E)
-                                : Colors.white,
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(
-                                color: isDarkMode
-                                    ? Colors.grey[700]!
-                                    : Colors.grey[300]!),
+                            color: colors.control,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: colors.strokeStrong),
                           ),
                           child: Shortcuts(
                             shortcuts: {
@@ -1236,8 +1204,13 @@ class _ChatScreenState extends State<ChatScreen> {
                           tooltip: '停止',
                           icon: const Icon(Icons.stop, size: 22),
                           style: IconButton.styleFrom(
-                            backgroundColor: const Color(0xFFFA5151),
-                            foregroundColor: Colors.white,
+                            backgroundColor: colors.danger,
+                            foregroundColor: colors.isDark
+                                ? const Color(0xFF041416)
+                                : Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(4),
+                            ),
                           ),
                           constraints: const BoxConstraints.tightFor(
                               width: 36, height: 36),
@@ -1253,20 +1226,18 @@ class _ChatScreenState extends State<ChatScreen> {
                               icon: const Icon(Icons.send, size: 22),
                               style: IconButton.styleFrom(
                                 backgroundColor: canSend
-                                    ? const Color(0xFF07C160)
+                                    ? colors.accent
                                     : Colors.transparent,
                                 foregroundColor: canSend
-                                    ? Colors.white
-                                    : isDarkMode
-                                        ? Colors.grey[400]
-                                        : Colors.grey[600],
+                                    ? colors.onAccent
+                                    : colors.textSecondary,
                                 side: BorderSide(
                                   color: canSend
                                       ? Colors.transparent
-                                      : (isDarkMode
-                                          ? Colors.grey[700]!
-                                          : Colors.grey[400]!),
-                                  width: 1,
+                                      : colors.strokeStrong,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(4),
                                 ),
                               ),
                               constraints: const BoxConstraints.tightFor(
@@ -1286,8 +1257,9 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildEmptyState(bool isDarkMode) {
+    final colors = FluentColors.of(context);
     return Container(
-      color: isDarkMode ? const Color(0xFF191919) : const Color(0xFFF5F5F5),
+      color: colors.background,
       child: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1295,8 +1267,9 @@ class _ChatScreenState extends State<ChatScreen> {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: isDarkMode ? const Color(0xFF2E2E2E) : Colors.white,
-                borderRadius: BorderRadius.circular(12),
+                color: colors.card,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: colors.stroke),
               ),
               child: Icon(
                 Icons.chat_bubble_outline,
@@ -1337,6 +1310,7 @@ class _ChatScreenState extends State<ChatScreen> {
       return _buildToolBubble(message, isDarkMode);
     }
 
+    final colors = FluentColors.of(context);
     final isUser = message.isUser;
     // 气泡最大宽度：屏幕宽度减去两个头像、边距及气泡间隔的距离
     // 头像 margin 8 + 宽度 40 + margin 8 = 56
@@ -1361,15 +1335,8 @@ class _ChatScreenState extends State<ChatScreen> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
-                      color: isDarkMode
-                          ? const Color(0xFF3EB575)
-                          : const Color(0xFF95EC69),
-                      borderRadius: BorderRadius.only(
-                        topLeft: const Radius.circular(6),
-                        topRight: const Radius.circular(6),
-                        bottomLeft: const Radius.circular(6),
-                        bottomRight: Radius.circular(2),
-                      ),
+                      color: colors.accent,
+                      borderRadius: BorderRadius.circular(8),
                     ),
                     child: _buildBubbleBody(message, isDarkMode, isUser: true),
                   ),
@@ -1399,15 +1366,9 @@ class _ChatScreenState extends State<ChatScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: isDarkMode ? const Color(0xFF2C2C2C) : Colors.white,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(6),
-                  topRight: const Radius.circular(6),
-                  bottomLeft: Radius.circular(2),
-                  bottomRight: Radius.circular(6),
-                ),
-                border: Border.all(
-                    color: isDarkMode ? Colors.grey[700]! : Colors.grey[300]!),
+                color: colors.card,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: colors.stroke),
               ),
               child: _buildBubbleBody(message, isDarkMode, isUser: false),
             ),
@@ -1431,7 +1392,8 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildLivePlainText(Message message, bool isDarkMode, {TextStyle? style}) {
+  Widget _buildLivePlainText(Message message, bool isDarkMode,
+      {TextStyle? style}) {
     final resolved = style ??
         TextStyle(
           fontSize: 16,
@@ -1458,6 +1420,7 @@ class _ChatScreenState extends State<ChatScreen> {
     bool isDarkMode, {
     required bool isUser,
   }) {
+    final colors = FluentColors.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -1469,7 +1432,17 @@ class _ChatScreenState extends State<ChatScreen> {
             isDarkMode: isDarkMode,
           ),
         message.isStreaming
-            ? _buildLivePlainText(message, isDarkMode)
+            ? _buildLivePlainText(
+                message,
+                isDarkMode,
+                style: TextStyle(
+                  fontSize: 16,
+                  height: 1.5,
+                  color: isUser
+                      ? colors.onAccent
+                      : (isDarkMode ? Colors.white : colors.textPrimary),
+                ),
+              )
             : MarkdownMessageView(
                 content: message.text,
                 isDarkMode: isDarkMode,
@@ -1480,12 +1453,13 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildToolBubble(Message message, bool isDarkMode) {
+    final colors = FluentColors.of(context);
     final status = message.toolStatus ?? '';
     final color = status == 'failed'
-        ? Colors.red
+        ? colors.danger
         : status == 'completed'
-            ? Colors.green
-            : Colors.orange;
+            ? colors.success
+            : colors.warning;
     final icon = message.kind == MessageKind.plan
         ? Icons.checklist
         : Icons.build_outlined;
@@ -1502,8 +1476,9 @@ class _ChatScreenState extends State<ChatScreen> {
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: isDarkMode ? const Color(0xFF232323) : const Color(0xFFF0F0F0),
+          color: colors.card,
           borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: colors.stroke),
         ),
         child: Row(
           children: [
@@ -1549,12 +1524,13 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildPlanBubble(Message message, bool isDarkMode) {
+    final colors = FluentColors.of(context);
     final status = message.toolStatus ?? '';
     final color = status == 'failed'
-        ? Colors.red
+        ? colors.danger
         : status == 'completed'
-            ? Colors.green
-            : Colors.orange;
+            ? colors.success
+            : colors.warning;
     final icon = message.kind == MessageKind.plan
         ? Icons.checklist
         : Icons.build_outlined;
@@ -1564,11 +1540,9 @@ class _ChatScreenState extends State<ChatScreen> {
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: isDarkMode ? const Color(0xFF232323) : const Color(0xFFF0F0F0),
+          color: colors.card,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: isDarkMode ? Colors.grey[800]! : Colors.grey[300]!,
-          ),
+          border: Border.all(color: colors.stroke),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1609,7 +1583,7 @@ class _ChatScreenState extends State<ChatScreen> {
           Icons.done,
           size: 14,
           color: message.confirmed
-              ? Colors.green
+              ? FluentColors.of(context).success
               : (isDarkMode ? Colors.grey[500] : Colors.grey[400]),
         ),
       ),
@@ -1624,9 +1598,9 @@ class _ChatScreenState extends State<ChatScreen> {
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: isUser
-            ? (isDarkMode ? const Color(0xFF4A4A4A) : Colors.grey[300])
-            : (isDarkMode ? const Color(0xFF2D3A4A) : Colors.blue[100]),
-        borderRadius: BorderRadius.circular(6),
+            ? FluentColors.of(context).control
+            : FluentColors.of(context).accentSubtle,
+        borderRadius: BorderRadius.circular(4),
       ),
       child: _userAvatarBase64 != null && isUser
           ? ClipRRect(
@@ -1804,7 +1778,7 @@ class _ThoughtBlockState extends State<_ThoughtBlock> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(56, 4, 16, 4),
       child: Material(
-        color: isDarkMode ? const Color(0xFF222222) : const Color(0xFFEDEDED),
+        color: FluentColors.of(context).card,
         borderRadius: BorderRadius.circular(8),
         child: InkWell(
           borderRadius: BorderRadius.circular(8),

@@ -36,7 +36,9 @@ class _CreateContactScreenState extends State<CreateContactScreen> {
       final contactService = ContactService();
       final contact = await contactService.createContact(
         name: name,
-        atName: _atNameController.text.trim().isEmpty ? null : _atNameController.text.trim(),
+        atName: _atNameController.text.trim().isEmpty
+            ? null
+            : _atNameController.text.trim(),
       );
       if (mounted) {
         Navigator.pop(context, contact);
@@ -52,12 +54,9 @@ class _CreateContactScreenState extends State<CreateContactScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final bool isDarkMode = Theme.of(context).brightness == Brightness.dark;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('新建联系人'),
-        backgroundColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -95,16 +94,16 @@ class _CreateContactScreenState extends State<CreateContactScreen> {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _isLoading ? null : _create,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF07C160),
-                ),
                 child: _isLoading
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 20,
                         height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Theme.of(context).colorScheme.onPrimary,
+                        ),
                       )
-                    : const Text('创建', style: TextStyle(color: Colors.white)),
+                    : const Text('创建'),
               ),
             ),
           ],

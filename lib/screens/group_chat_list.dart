@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:pocket_bot/theme/fluent_theme.dart';
 import 'package:pocket_bot/models/group_chat.dart';
 import 'package:pocket_bot/services/group_chat_service.dart';
 import 'package:pocket_bot/screens/group_chat_screen.dart';
@@ -90,8 +91,8 @@ class _GroupChatListScreenState extends State<GroupChatListScreen> {
           return _GroupListTile(
             group: group,
             onTap: () => _openGroupChat(group),
-            onShowInSessionList: group.showInSessionList 
-                ? null 
+            onShowInSessionList: group.showInSessionList
+                ? null
                 : () => _showGroupInSessionList(group),
           );
         },
@@ -158,12 +159,13 @@ class _GroupListTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       leading: CircleAvatar(
-        backgroundImage: group.avatar != null ? NetworkImage(group.avatar!) : null,
-        backgroundColor: Colors.green,
-        child: group.avatar == null 
+        backgroundImage:
+            group.avatar != null ? NetworkImage(group.avatar!) : null,
+        backgroundColor: FluentColors.of(context).accent,
+        child: group.avatar == null
             ? Text(
                 group.name.isNotEmpty ? group.name[0] : '?',
-                style: const TextStyle(color: Colors.white),
+                style: TextStyle(color: FluentColors.of(context).onAccent),
               )
             : null,
       ),

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:pocket_bot/theme/fluent_theme.dart';
 import 'package:pocket_bot/widgets/markdown_message_widget.dart';
 import 'package:pocket_bot/widgets/attachment_widget.dart';
 
@@ -8,22 +9,31 @@ import 'package:pocket_bot/widgets/attachment_widget.dart';
 class ChatBubbleWidget extends StatelessWidget {
   /// 消息内容
   final String content;
+
   /// 是否是用户发送的消息
   final bool isUser;
+
   /// 是否是深色模式
   final bool isDarkMode;
+
   /// 发送者名称（群聊需要）
   final String? senderName;
+
   /// 发送者头像 URL 或 base64
   final String? senderAvatar;
+
   /// 当前用户 ID（用于判断是否是自己）
   final String? currentUserId;
+
   /// 消息 ID
   final String? messageId;
+
   /// 附件列表
   final List<dynamic> attachments;
+
   /// 消息状态（已发送、已读等）
   final bool isConfirmed;
+
   /// 消息是否正在流式输出
   final bool isStreaming;
 
@@ -69,15 +79,11 @@ class ChatBubbleWidget extends StatelessWidget {
               ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: maxWidth),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
-                    color: isDarkMode ? const Color(0xFF3EB575) : const Color(0xFF95EC69),
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(6),
-                      topRight: Radius.circular(6),
-                      bottomLeft: Radius.circular(6),
-                      bottomRight: Radius.circular(2),
-                    ),
+                    color: FluentColors.of(context).accent,
+                    borderRadius: BorderRadius.circular(8),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -105,7 +111,7 @@ class ChatBubbleWidget extends StatelessWidget {
             ],
           ),
           const SizedBox(width: 8),
-          _buildAvatar(),
+          _buildAvatar(context),
         ],
       ),
     );
@@ -119,23 +125,16 @@ class ChatBubbleWidget extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildAvatar(),
+          _buildAvatar(context),
           const SizedBox(width: 8),
           ConstrainedBox(
             constraints: BoxConstraints(maxWidth: maxWidth),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: isDarkMode ? const Color(0xFF262626) : Colors.white,
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(6),
-                  topRight: Radius.circular(6),
-                  bottomLeft: Radius.circular(2),
-                  bottomRight: Radius.circular(6),
-                ),
-                border: Border.all(
-                  color: isDarkMode ? Colors.grey[700]! : Colors.grey[300]!,
-                ),
+                color: FluentColors.of(context).card,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: FluentColors.of(context).stroke),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -204,7 +203,7 @@ class ChatBubbleWidget extends StatelessWidget {
   }
 
   /// 构建头像
-  Widget _buildAvatar() {
+  Widget _buildAvatar(BuildContext context) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 8),
       width: 40,
@@ -212,9 +211,9 @@ class ChatBubbleWidget extends StatelessWidget {
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: isUser
-            ? (isDarkMode ? const Color(0xFF4A4A4A) : Colors.grey[300])
-            : (isDarkMode ? const Color(0xFF2D3A4A) : Colors.blue[100]),
-        borderRadius: BorderRadius.circular(6),
+            ? FluentColors.of(context).control
+            : FluentColors.of(context).accentSubtle,
+        borderRadius: BorderRadius.circular(4),
       ),
       child: _buildAvatarContent(),
     );
@@ -285,8 +284,8 @@ class TimeDivider extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         decoration: BoxDecoration(
-          color: isDarkMode 
-              ? Colors.grey[800]!.withValues(alpha: 0.8) 
+          color: isDarkMode
+              ? Colors.grey[800]!.withValues(alpha: 0.8)
               : Colors.grey[300]!.withValues(alpha: 0.8),
           borderRadius: BorderRadius.circular(4),
         ),
@@ -390,7 +389,8 @@ class _TypingDots extends StatefulWidget {
   State<_TypingDots> createState() => _TypingDotsState();
 }
 
-class _TypingDotsState extends State<_TypingDots> with TickerProviderStateMixin {
+class _TypingDotsState extends State<_TypingDots>
+    with TickerProviderStateMixin {
   late final List<AnimationController> _controllers;
   late final List<Animation<double>> _animations;
 
@@ -453,8 +453,10 @@ class _TypingDotsState extends State<_TypingDots> with TickerProviderStateMixin 
               height: 6,
               decoration: BoxDecoration(
                 color: widget.isDarkMode
-                    ? Colors.grey[400]!.withValues(alpha: 0.4 + _animations[index].value * 0.6)
-                    : Colors.grey[600]!.withValues(alpha: 0.4 + _animations[index].value * 0.6),
+                    ? Colors.grey[400]!
+                        .withValues(alpha: 0.4 + _animations[index].value * 0.6)
+                    : Colors.grey[600]!.withValues(
+                        alpha: 0.4 + _animations[index].value * 0.6),
                 shape: BoxShape.circle,
               ),
             );

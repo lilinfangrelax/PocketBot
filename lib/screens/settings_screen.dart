@@ -10,6 +10,7 @@ import 'package:pocket_bot/main.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/utils/version_utils.dart';
+import 'package:pocket_bot/theme/fluent_theme.dart';
 import 'package:pocket_bot/widgets/update_settings_card.dart';
 
 /// Settings screen
@@ -146,8 +147,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 width: 100,
                 height: 100,
                 child: CircleAvatar(
-                  backgroundColor: Colors.blue.shade100,
-                  child: const Icon(Icons.person, size: 50, color: Colors.blue),
+                  backgroundColor: FluentColors.of(context).accentSubtle,
+                  child: Icon(Icons.person,
+                      size: 50, color: FluentColors.of(context).accent),
                 ),
               ),
               const SizedBox(height: 16),
@@ -227,9 +229,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ),
                             )
                           : CircleAvatar(
-                              backgroundColor: Colors.blue.shade100,
-                              child:
-                                  const Icon(Icons.person, color: Colors.blue),
+                              backgroundColor:
+                                  FluentColors.of(context).accentSubtle,
+                              child: Icon(Icons.person,
+                                  color: FluentColors.of(context).accent),
                             ),
                     ),
                   ),

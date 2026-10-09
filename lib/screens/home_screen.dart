@@ -14,6 +14,7 @@ import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
 import 'package:pocket_bot/services/ssh_remote_session.dart';
 import 'package:pocket_bot/services/websocket_service.dart' as ws;
+import 'package:pocket_bot/theme/fluent_theme.dart';
 
 typedef ConnectionState = ws.ConnectionState;
 
@@ -47,8 +48,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _agentLabel = 'Cursor';
 
   bool get _canLaunchLocal =>
-      !kIsWeb &&
-      (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+      !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
   @override
   void initState() {
@@ -174,7 +174,7 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         _buildStatusBar(
           icon: Icons.check_circle,
-          color: Colors.green,
+          color: FluentColors.of(context).success,
           text: '已连接到 ${gateway?.name ?? 'Agent'}',
           subText: gateway?.displayLabel,
           actions: [
@@ -212,7 +212,7 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         _buildStatusBar(
           icon: Icons.sync,
-          color: Colors.blue,
+          color: FluentColors.of(context).info,
           text: '正在启动 ${gateway?.name ?? 'Agent'}...',
           subText: gateway?.displayLabel,
           showProgress: true,
@@ -230,23 +230,27 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         _buildStatusBar(
           icon: Icons.error_outline,
-          color: Colors.red,
+          color: FluentColors.of(context).danger,
           text: '连接失败',
           subText: gateway?.displayLabel,
         ),
         const SizedBox(height: 8),
         Card(
-          color: Colors.red.shade50,
+          color: FluentColors.of(context).dangerSurface,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
               children: [
-                Icon(Icons.info_outline, size: 18, color: Colors.red.shade700),
+                Icon(Icons.info_outline,
+                    size: 18, color: FluentColors.of(context).danger),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     _simplifyError(manager.errorMessage),
-                    style: TextStyle(color: Colors.red.shade700, fontSize: 13),
+                    style: TextStyle(
+                      color: FluentColors.of(context).danger,
+                      fontSize: 13,
+                    ),
                   ),
                 ),
               ],
@@ -783,8 +787,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   controller: _portController,
                   decoration: const InputDecoration(labelText: '端口'),
                   keyboardType: TextInputType.number,
-                  onChanged: (value) =>
-                      _manualPort = int.tryParse(value) ?? 22,
+                  onChanged: (value) => _manualPort = int.tryParse(value) ?? 22,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
@@ -831,19 +834,18 @@ class _HomeScreenState extends State<HomeScreen> {
               child: const Text('取消'),
             ),
             ElevatedButton(
-              onPressed:
-                  _manualHost.isNotEmpty && _manualUsername.isNotEmpty
-                      ? () {
-                          final manager = context.read<ConnectionManager>();
-                          final gateway = _buildSshTarget();
-                          if (isEditing) {
-                            manager.removeSavedGateway(existingGateway);
-                          }
-                          manager.addSavedGateway(gateway);
-                          Navigator.pop(context);
-                          _startSshFlow(manager, existing: gateway);
-                        }
-                      : null,
+              onPressed: _manualHost.isNotEmpty && _manualUsername.isNotEmpty
+                  ? () {
+                      final manager = context.read<ConnectionManager>();
+                      final gateway = _buildSshTarget();
+                      if (isEditing) {
+                        manager.removeSavedGateway(existingGateway);
+                      }
+                      manager.addSavedGateway(gateway);
+                      Navigator.pop(context);
+                      _startSshFlow(manager, existing: gateway);
+                    }
+                  : null,
               child: Text(isEditing ? '保存并选择目录' : '添加并选择目录'),
             ),
           ],

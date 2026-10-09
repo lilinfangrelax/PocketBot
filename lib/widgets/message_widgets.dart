@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pocket_bot/models/message.dart';
+import 'package:pocket_bot/theme/fluent_theme.dart';
 
 /// Message bubble widget
 class MessageBubble extends StatelessWidget {
@@ -21,14 +22,12 @@ class MessageBubble extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: BoxDecoration(
             color: isUser
-                ? const Color(0xFF1AAA55)  // 深绿色，类似微信
-                : Colors.grey[200],
-            borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(16),
-              topRight: const Radius.circular(16),
-              bottomLeft: Radius.circular(isUser ? 16 : 4),
-              bottomRight: Radius.circular(isUser ? 4 : 16),
-            ),
+                ? FluentColors.of(context).accent
+                : FluentColors.of(context).card,
+            borderRadius: BorderRadius.circular(8),
+            border: isUser
+                ? null
+                : Border.all(color: FluentColors.of(context).stroke),
           ),
           constraints: BoxConstraints(
             // 气泡最大宽度：屏幕宽度减去两个头像、边距及气泡间隔的距离
@@ -45,7 +44,9 @@ class MessageBubble extends StatelessWidget {
               SelectableText(
                 message.text,
                 style: TextStyle(
-                  color: Colors.black87,  // 黑色文字，类似微信
+                  color: isUser
+                      ? FluentColors.of(context).onAccent
+                      : FluentColors.of(context).textPrimary,
                 ),
               ),
               const SizedBox(height: 4),
@@ -57,7 +58,7 @@ class MessageBubble extends StatelessWidget {
                     const Icon(
                       Icons.done_all,
                       size: 14,
-                      color: Colors.white70,  // 浅白色勾
+                      color: Colors.white70, // 浅白色勾
                     ),
                   const SizedBox(width: 4),
                   Text(
@@ -83,7 +84,8 @@ class MessageBubble extends StatelessWidget {
     showMenu(
       context: context,
       position: RelativeRect.fromRect(
-        Rect.fromLTWH(offset.dx, offset.dy, renderBox.size.width, renderBox.size.height),
+        Rect.fromLTWH(
+            offset.dx, offset.dy, renderBox.size.width, renderBox.size.height),
         Offset.zero & Size.infinite,
       ),
       items: [
@@ -124,7 +126,8 @@ class TypingIndicator extends StatefulWidget {
   State<TypingIndicator> createState() => _TypingIndicatorState();
 }
 
-class _TypingIndicatorState extends State<TypingIndicator> with SingleTickerProviderStateMixin {
+class _TypingIndicatorState extends State<TypingIndicator>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final List<_DotAnimation> _dotAnimations;
 
@@ -215,7 +218,7 @@ class _DotAnimation extends ChangeNotifier {
     final progress = controller.value;
     // Each dot starts at a different phase
     final dotProgress = (progress * 3 - index / 3).clamp(0.0, 1.0);
-    
+
     if (dotProgress < 0.5) {
       offset = -4 * (dotProgress * 2);
     } else {

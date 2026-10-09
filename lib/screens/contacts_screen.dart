@@ -5,6 +5,7 @@ import 'package:pocket_bot/screens/contact_detail_screen.dart';
 import 'package:pocket_bot/screens/create_contact_screen.dart';
 import 'package:pocket_bot/screens/create_group_screen.dart';
 import 'package:pocket_bot/screens/group_chat_list.dart';
+import 'package:pocket_bot/theme/fluent_theme.dart';
 
 // ============ 常量定义 ============
 const double _kSpacingMedium = 16;
@@ -146,12 +147,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
           width: 40,
           height: 40,
           decoration: BoxDecoration(
-            color: Colors.green,
-            borderRadius: BorderRadius.circular(6),
+            color: FluentColors.of(context).accent,
+            borderRadius: BorderRadius.circular(4),
           ),
-          child: const Icon(
+          child: Icon(
             Icons.group,
-            color: Colors.white,
+            color: FluentColors.of(context).onAccent,
             size: 22,
           ),
         ),
@@ -166,12 +167,10 @@ class _ContactsScreenState extends State<ContactsScreen> {
   Widget _buildContactItem(Contact contact) {
     return ListTile(
       leading: CircleAvatar(
-        backgroundImage: contact.avatar != null
-            ? NetworkImage(contact.avatar!)
-            : null,
-        child: contact.avatar == null
-            ? Text(contact.name[0].toUpperCase())
-            : null,
+        backgroundImage:
+            contact.avatar != null ? NetworkImage(contact.avatar!) : null,
+        child:
+            contact.avatar == null ? Text(contact.name[0].toUpperCase()) : null,
       ),
       title: Text(contact.name),
       subtitle: Text('@${contact.atName}'),

@@ -8,6 +8,7 @@ import 'package:pocket_bot/screens/group_chat_screen.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/services/group_chat_service.dart';
 import 'package:pocket_bot/widgets/unread_badge.dart';
+import 'package:pocket_bot/theme/fluent_theme.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/services/websocket_service.dart';
 
@@ -33,10 +34,10 @@ class SessionItem {
     this.lastMessage,
     this.unreadCount = 0,
   }) : assert((type == SessionItemType.personal && personalSession != null) ||
-           (type == SessionItemType.group && groupChat != null));
+            (type == SessionItemType.group && groupChat != null));
 
-  String get key => type == SessionItemType.personal 
-      ? personalSession!.key 
+  String get key => type == SessionItemType.personal
+      ? personalSession!.key
       : 'group_${groupChat!.id}';
 }
 
@@ -67,7 +68,7 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
 
   void _listenToSessionChanges() {
     _wsService = context.read<ConnectionManager>().wsService;
-    
+
     _wsListener = () {
       if (mounted) {
         _refreshSessions();
@@ -90,10 +91,10 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
 
     try {
       final wsService = context.read<ConnectionManager>().wsService;
-      
+
       // Load personal sessions from local storage
       final sessions = await SessionStorage.loadAllSessions();
-      
+
       // Merge with in-memory session state (to get real-time unreadCount)
       for (final session in sessions) {
         final sessionState = wsService.getSession(session.key);
@@ -103,22 +104,27 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
           session.lastUpdated = sessionState.lastUpdated;
         }
       }
-      
+
       // Convert personal sessions to SessionItem
-      List<SessionItem> sessionItems = sessions.map((s) => SessionItem(
-        type: SessionItemType.personal,
-        personalSession: s,
-        lastUpdated: s.lastUpdated,
-        title: s.title,
-        lastMessage: s.lastMessagePreview ?? (s.messages.isNotEmpty ? s.messages.last.text : null),
-        unreadCount: s.unreadCount,
-      )).toList();
-      
+      List<SessionItem> sessionItems = sessions
+          .map((s) => SessionItem(
+                type: SessionItemType.personal,
+                personalSession: s,
+                lastUpdated: s.lastUpdated,
+                title: s.title,
+                lastMessage: s.lastMessagePreview ??
+                    (s.messages.isNotEmpty ? s.messages.last.text : null),
+                unreadCount: s.unreadCount,
+              ))
+          .toList();
+
       // Load group chats (only show in session list)
       try {
-        final groups = await _groupChatService.getAllGroups(showInSessionList: true);
+        final groups =
+            await _groupChatService.getAllGroups(showInSessionList: true);
         for (final group in groups) {
-          final lastMessage = await _groupChatService.getGroupLastMessage(group.id);
+          final lastMessage =
+              await _groupChatService.getGroupLastMessage(group.id);
           sessionItems.add(SessionItem(
             type: SessionItemType.group,
             groupChat: group,
@@ -131,12 +137,12 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
       } catch (e) {
         Logger.warning('Failed to load groups: $e');
       }
-      
+
       if (!mounted) return;
-      
+
       _allSessions = sessionItems
         ..sort((a, b) => b.lastUpdated.compareTo(a.lastUpdated));
-      
+
       _updateFilteredSessions();
     } catch (e) {
       Logger.warning('Failed to load sessions: $e');
@@ -152,8 +158,8 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
       _filteredSessions = List.from(_allSessions);
     } else {
       _filteredSessions = _allSessions
-          .where((s) =>
-              s.title.toLowerCase().contains(_searchQuery.toLowerCase()))
+          .where(
+              (s) => s.title.toLowerCase().contains(_searchQuery.toLowerCase()))
           .toList();
     }
   }
@@ -244,7 +250,8 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
       final wsService = context.read<ConnectionManager>().wsService;
       // Deactivate current session first so incoming messages can be counted as unread
       wsService.deactivateCurrentSession();
-      wsService.selectSession(sessionItem.personalSession!.key, agentId: sessionItem.personalSession!.agentId);
+      wsService.selectSession(sessionItem.personalSession!.key,
+          agentId: sessionItem.personalSession!.agentId);
       _navigateToChat();
     }
   }
@@ -255,7 +262,8 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
       await wsService.deleteSession(sessionItem.personalSession!.key);
     } else {
       // 群聊：从会话列表中隐藏
-      await _groupChatService.hideGroupFromSessionList(sessionItem.groupChat!.id);
+      await _groupChatService
+          .hideGroupFromSessionList(sessionItem.groupChat!.id);
     }
     _loadSessions();
   }
@@ -286,7 +294,7 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
 
   Widget _buildSessionItem(SessionItem sessionItem, String sessionKey) {
     final wsService = context.read<ConnectionManager>().wsService;
-    final isCurrentSession = sessionItem.type == SessionItemType.personal && 
+    final isCurrentSession = sessionItem.type == SessionItemType.personal &&
         sessionKey == wsService.currentSessionKey;
 
     // Get unread count
@@ -302,7 +310,7 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
       confirmDismiss: (direction) async {
         _showDeleteConfirmation(sessionItem);
         return false;
-        },
+      },
       background: Container(
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
@@ -314,8 +322,10 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
+            color:
+                isCurrentSession ? FluentColors.of(context).accentSubtle : null,
             border: Border(
-              bottom: BorderSide(color: Colors.grey[200]!),
+              bottom: BorderSide(color: FluentColors.of(context).stroke),
             ),
           ),
           child: Row(
@@ -362,8 +372,7 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        if (unreadCount > 0)
-                          UnreadBadge(count: unreadCount),
+                        if (unreadCount > 0) UnreadBadge(count: unreadCount),
                       ],
                     ),
                   ],
@@ -383,15 +392,16 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
     } else {
       // 个人会话头像
       const icon = Icons.chat_bubble;
-      const iconColor = Colors.white;
-      const bgColor = Colors.blue;
+      final colors = FluentColors.of(context);
+      final iconColor = colors.onAccent;
+      final bgColor = colors.accent;
 
       return Container(
         width: 48,
         height: 48,
         decoration: BoxDecoration(
           color: bgColor,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(4),
         ),
         child: Icon(
           icon,
@@ -411,12 +421,12 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
         width: 48,
         height: 48,
         decoration: BoxDecoration(
-          color: Colors.green,
-          borderRadius: BorderRadius.circular(6),
+          color: FluentColors.of(context).accent,
+          borderRadius: BorderRadius.circular(4),
         ),
-        child: const Icon(
+        child: Icon(
           Icons.group,
-          color: Colors.white,
+          color: FluentColors.of(context).onAccent,
           size: 26,
         ),
       );
@@ -522,7 +532,8 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
           width: size,
           height: size,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => _buildDefaultAvatar(member.userName, size),
+          errorBuilder: (_, __, ___) =>
+              _buildDefaultAvatar(member.userName, size),
         ),
       );
     }
@@ -577,25 +588,15 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: isDarkMode ? const Color(0xFF1E1E1E) : const Color(0xFFEDEDED),
-        elevation: 0,
-        title: const Text(
-          '消息',
-          style: TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
+        title: const Text('消息'),
         actions: [
           IconButton(
             icon: const Icon(Icons.search),
             onPressed: _showSearch,
-            color: isDarkMode ? Colors.white : Colors.black87,
           ),
           IconButton(
             icon: const Icon(Icons.add),
             onPressed: _createSession,
-            color: isDarkMode ? Colors.white : Colors.black87,
           ),
         ],
       ),

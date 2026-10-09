@@ -38,7 +38,7 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
         setState(() => _contact = contact);
       }
       _changeLogs = await _contactService.getChangeLogs(_contact.id);
-      
+
       // 获取该联系人所在的群聊
       _groups = await _groupChatService.getUserGroups(_contact.id);
     } catch (e) {
@@ -114,7 +114,6 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('联系人详情'),
-        backgroundColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
         actions: [
           IconButton(
             icon: const Icon(Icons.edit),
@@ -136,18 +135,20 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
                   Center(
                     child: CircleAvatar(
                       radius: 50,
-                      backgroundColor: const Color(0xFF07C160),
-                      child: _contact.avatar != null && _contact.avatar!.isNotEmpty
-                          ? ClipOval(
-                              child: Image.network(
-                                _contact.avatar!,
-                                width: 100,
-                                height: 100,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => _buildAvatarText(),
-                              ),
-                            )
-                          : _buildAvatarText(),
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                      child:
+                          _contact.avatar != null && _contact.avatar!.isNotEmpty
+                              ? ClipOval(
+                                  child: Image.network(
+                                    _contact.avatar!,
+                                    width: 100,
+                                    height: 100,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) =>
+                                        _buildAvatarText(),
+                                  ),
+                                )
+                              : _buildAvatarText(),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -173,7 +174,8 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
                   const SizedBox(height: 20),
                   // 状态
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
                       color: _contact.isActive ? Colors.green : Colors.grey,
                       borderRadius: BorderRadius.circular(20),
@@ -193,7 +195,9 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
                       padding: const EdgeInsets.all(16),
                       margin: const EdgeInsets.symmetric(horizontal: 16),
                       decoration: BoxDecoration(
-                        color: isDarkMode ? const Color(0xFF2D2D2D) : Colors.grey[100],
+                        color: isDarkMode
+                            ? const Color(0xFF2D2D2D)
+                            : Colors.grey[100],
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Column(
@@ -213,7 +217,8 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
                             ],
                           ),
                           const SizedBox(height: 12),
-                          ..._groups.map((group) => _buildGroupItem(group, isDarkMode)),
+                          ..._groups.map(
+                              (group) => _buildGroupItem(group, isDarkMode)),
                         ],
                       ),
                     ),
@@ -224,7 +229,9 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
                       padding: const EdgeInsets.all(16),
                       margin: const EdgeInsets.symmetric(horizontal: 16),
                       decoration: BoxDecoration(
-                        color: isDarkMode ? const Color(0xFF2D2D2D) : Colors.grey[100],
+                        color: isDarkMode
+                            ? const Color(0xFF2D2D2D)
+                            : Colors.grey[100],
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Column(
@@ -253,7 +260,9 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
                                         _getChangeDescription(log),
                                         style: TextStyle(
                                           fontSize: 14,
-                                          color: isDarkMode ? Colors.grey[300] : Colors.grey[700],
+                                          color: isDarkMode
+                                              ? Colors.grey[300]
+                                              : Colors.grey[700],
                                         ),
                                       ),
                                     ),
@@ -279,9 +288,9 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
   Widget _buildAvatarText() {
     return Text(
       _contact.name.isNotEmpty ? _contact.name[0].toUpperCase() : '?',
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 32,
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.onPrimary,
         fontWeight: FontWeight.bold,
       ),
     );
@@ -501,7 +510,8 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
           width: size,
           height: size,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => _buildDefaultAvatar(member.userName, size),
+          errorBuilder: (_, __, ___) =>
+              _buildDefaultAvatar(member.userName, size),
         ),
       );
     }
@@ -576,7 +586,9 @@ class _EditContactScreenState extends State<EditContactScreen> {
       final updated = await _contactService.updateContact(
         id: _contact.id,
         name: name,
-        atName: _atNameController.text.trim().isEmpty ? null : _atNameController.text.trim(),
+        atName: _atNameController.text.trim().isEmpty
+            ? null
+            : _atNameController.text.trim(),
       );
       if (mounted) {
         Navigator.pop(context, updated);
@@ -592,12 +604,9 @@ class _EditContactScreenState extends State<EditContactScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final bool isDarkMode = Theme.of(context).brightness == Brightness.dark;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('编辑联系人'),
-        backgroundColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
         actions: [
           TextButton(
             onPressed: _isLoading ? null : _save,

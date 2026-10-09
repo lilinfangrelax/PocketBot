@@ -41,16 +41,20 @@ class MarkdownMessageView extends StatelessWidget {
   }
 
   MarkdownStyleSheet _buildMarkdownStyleSheet() {
-    // User messages always use black text, others follow the theme
-    final textColor = isUser ? Colors.black87 : (isDarkMode ? Colors.white : Colors.black87);
+    // User bubbles use the accent fill, so the text has to contrast with it.
+    final textColor = isUser
+        ? (isDarkMode ? const Color(0xFF041416) : Colors.white)
+        : (isDarkMode ? Colors.white : const Color(0xE4000000));
     // A2: 使用更明显的代码背景颜色
-    final codeBgColor = isDarkMode ? const Color(0xFF1E1E1E) : const Color(0xFFE8E8E8);
-    final inlineCodeColor = isDarkMode ? const Color(0xFF9CDCFE) : const Color(0xFFAF00D7);
+    final codeBgColor =
+        isDarkMode ? const Color(0xFF1E1E1E) : const Color(0xFFE8E8E8);
+    final inlineCodeColor =
+        isDarkMode ? const Color(0xFF9CDCFE) : const Color(0xFFAF00D7);
 
     return MarkdownStyleSheet(
       p: TextStyle(
         color: textColor,
-        fontSize: 16,  // D2: 调整为16px
+        fontSize: 16, // D2: 调整为16px
         height: 1.5,
       ),
       h1: TextStyle(
@@ -80,7 +84,8 @@ class MarkdownMessageView extends StatelessWidget {
         color: isDarkMode ? Colors.grey[400]! : Colors.grey[600]!,
         fontStyle: FontStyle.italic,
       ),
-      blockquotePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      blockquotePadding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       blockquoteDecoration: BoxDecoration(
         color: isDarkMode ? Colors.grey[900]! : Colors.grey[100]!,
         border: Border(
@@ -93,7 +98,7 @@ class MarkdownMessageView extends StatelessWidget {
       code: TextStyle(
         color: inlineCodeColor,
         fontFamily: 'monospace',
-        fontSize: 14,  // D2: 调整为14px
+        fontSize: 14, // D2: 调整为14px
         backgroundColor: codeBgColor,
       ),
       a: TextStyle(
@@ -146,7 +151,7 @@ class InlineCodeBuilder extends MarkdownElementBuilder {
       codeContent.toString(),
       style: TextStyle(
         fontFamily: 'monospace',
-        fontSize: 14,  // D2: 调整为14px
+        fontSize: 14, // D2: 调整为14px
         color: inlineCodeColor,
         backgroundColor: codeBgColor,
       ),
@@ -230,7 +235,9 @@ class _CodeBlockWidgetState extends State<CodeBlockWidget> {
     // User messages use light theme for code blocks, others follow theme
     final bgColor = widget.isUser
         ? const Color(0xFFF8F8F8)
-        : (widget.isDarkMode ? const Color(0xFF1E1E1E) : const Color(0xFFF8F8F8));
+        : (widget.isDarkMode
+            ? const Color(0xFF1E1E1E)
+            : const Color(0xFFF8F8F8));
     final borderColor = widget.isUser
         ? Colors.grey[300]!
         : (widget.isDarkMode ? Colors.grey[700]! : Colors.grey[300]!);
@@ -273,9 +280,11 @@ class _CodeBlockWidgetState extends State<CodeBlockWidget> {
               GestureDetector(
                 onTap: _copyCode,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: widget.isDarkMode ? Colors.grey[800] : Colors.grey[200],
+                    color:
+                        widget.isDarkMode ? Colors.grey[800] : Colors.grey[200],
                     borderRadius: BorderRadius.circular(3),
                   ),
                   child: Row(
@@ -286,7 +295,9 @@ class _CodeBlockWidgetState extends State<CodeBlockWidget> {
                         size: 12,
                         color: _copied
                             ? Colors.green
-                            : (widget.isDarkMode ? Colors.grey[400] : Colors.grey[600]),
+                            : (widget.isDarkMode
+                                ? Colors.grey[400]
+                                : Colors.grey[600]),
                       ),
                       const SizedBox(width: 3),
                       Text(
@@ -295,7 +306,9 @@ class _CodeBlockWidgetState extends State<CodeBlockWidget> {
                           fontSize: 11,
                           color: _copied
                               ? Colors.green
-                              : (widget.isDarkMode ? Colors.grey[400] : Colors.grey[600]),
+                              : (widget.isDarkMode
+                                  ? Colors.grey[400]
+                                  : Colors.grey[600]),
                         ),
                       ),
                     ],
@@ -311,7 +324,8 @@ class _CodeBlockWidgetState extends State<CodeBlockWidget> {
           decoration: BoxDecoration(
             color: bgColor,
             border: Border.all(color: borderColor),
-            borderRadius: const BorderRadius.vertical(bottom: Radius.circular(6)),
+            borderRadius:
+                const BorderRadius.vertical(bottom: Radius.circular(6)),
           ),
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -320,7 +334,9 @@ class _CodeBlockWidgetState extends State<CodeBlockWidget> {
               style: TextStyle(
                 fontFamily: 'monospace',
                 fontSize: 12,
-                color: widget.isDarkMode ? const Color(0xFFD4D4D4) : const Color(0xFF24292E),
+                color: widget.isDarkMode
+                    ? const Color(0xFFD4D4D4)
+                    : const Color(0xFF24292E),
                 height: 1.5,
               ),
             ),

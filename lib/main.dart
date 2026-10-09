@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pocket_bot/config/update_config.dart';
@@ -11,6 +10,7 @@ import 'package:pocket_bot/services/notification_service.dart';
 import 'package:pocket_bot/services/websocket_service.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/utils/version_utils.dart';
+import 'package:pocket_bot/theme/fluent_theme.dart';
 import 'package:pocket_bot/widgets/update_settings_card.dart';
 
 /// User config provider for avatar changes
@@ -117,26 +117,8 @@ class _PocketBotAppState extends State<PocketBotApp> {
     return MaterialApp(
       title: 'PocketBot',
       navigatorKey: appNavigatorKey,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blue,
-          primary: Colors.blue,
-          secondary: Colors.blueAccent,
-          brightness: Brightness.light,
-        ),
-        textTheme: GoogleFonts.interTextTheme(),
-        useMaterial3: true,
-      ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blue,
-          primary: Colors.blue,
-          secondary: Colors.blueAccent,
-          brightness: Brightness.dark,
-        ),
-        textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
-        useMaterial3: true,
-      ),
+      theme: buildFluentTheme(Brightness.light),
+      darkTheme: buildFluentTheme(Brightness.dark),
       themeMode: themeMode,
       home: const MainScreen(),
       debugShowCheckedModeBanner: false,

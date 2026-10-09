@@ -103,10 +103,10 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     try {
       // 获取选中的联系人ID列表
       final memberIds = _selectedMembers.map((m) => m.id).toList();
-      
+
       // 调用服务创建群聊
       await _groupChatService.createGroup(groupName, memberIds);
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('群组 "$groupName" 创建成功！')),
@@ -128,12 +128,9 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final bool isDarkMode = Theme.of(context).brightness == Brightness.dark;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('创建群组'),
-        backgroundColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
         actions: [
           _isCreating
               ? const Padding(
@@ -157,7 +154,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                 // 群组名称输入
                 Container(
                   padding: const EdgeInsets.all(16),
-                  color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+                  color: Theme.of(context).colorScheme.surfaceContainerLowest,
                   child: TextField(
                     controller: _groupNameController,
                     decoration: const InputDecoration(
@@ -169,8 +166,9 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                 // 已选择成员
                 if (_selectedMembers.isNotEmpty)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    color: isDarkMode ? const Color(0xFF2D2D2D) : Colors.grey[100],
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    color: Theme.of(context).colorScheme.surfaceContainer,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -190,7 +188,8 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                               label: Text(member.name),
                               deleteIcon: const Icon(Icons.close, size: 16),
                               onDeleted: () => _toggleMember(
-                                _availableContacts.firstWhere((c) => c.id == member.id),
+                                _availableContacts
+                                    .firstWhere((c) => c.id == member.id),
                               ),
                             );
                           }).toList(),
@@ -238,27 +237,32 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
                             return ListTile(
                               leading: CircleAvatar(
-                                backgroundColor: const Color(0xFF07C160),
-                                child: contact.avatar != null && contact.avatar!.isNotEmpty
+                                backgroundColor:
+                                    Theme.of(context).colorScheme.primary,
+                                child: contact.avatar != null &&
+                                        contact.avatar!.isNotEmpty
                                     ? ClipOval(
                                         child: Image.network(
                                           contact.avatar!,
                                           width: 40,
                                           height: 40,
                                           fit: BoxFit.cover,
-                                          errorBuilder: (_, __, ___) => _buildAvatarText(contact.name),
+                                          errorBuilder: (_, __, ___) =>
+                                              _buildAvatarText(contact.name),
                                         ),
                                       )
                                     : _buildAvatarText(contact.name),
                               ),
                               title: Text(contact.name),
-                              subtitle: contact.atName != null && contact.atName!.isNotEmpty
+                              subtitle: contact.atName != null &&
+                                      contact.atName!.isNotEmpty
                                   ? Text('@${contact.atName}')
                                   : null,
                               trailing: Checkbox(
                                 value: isSelected,
                                 onChanged: (_) => _toggleMember(contact),
-                                activeColor: const Color(0xFF07C160),
+                                activeColor:
+                                    Theme.of(context).colorScheme.primary,
                               ),
                             );
                           },
@@ -272,8 +276,8 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   Widget _buildAvatarText(String name) {
     return Text(
       name.isNotEmpty ? name[0].toUpperCase() : '?',
-      style: const TextStyle(
-        color: Colors.white,
+      style: TextStyle(
+        color: Theme.of(context).colorScheme.onPrimary,
         fontWeight: FontWeight.bold,
       ),
     );
