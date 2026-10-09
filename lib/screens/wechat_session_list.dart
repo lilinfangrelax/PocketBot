@@ -1,3 +1,4 @@
+import 'package:fluent_ui/fluent_ui.dart' as fluent;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:pocket_bot/config/session_storage.dart';
@@ -7,6 +8,7 @@ import 'package:pocket_bot/screens/chat_screen.dart';
 import 'package:pocket_bot/screens/group_chat_screen.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/services/group_chat_service.dart';
+import 'package:pocket_bot/widgets/fluent_page.dart';
 import 'package:pocket_bot/widgets/unread_badge.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
 import 'package:pocket_bot/utils/logger.dart';
@@ -186,25 +188,20 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          TextField(
+          fluent.TextBox(
             controller: _searchController,
             autofocus: true,
-            decoration: InputDecoration(
-              hintText: '搜索会话',
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon: IconButton(
-                icon: const Icon(Icons.clear),
-                onPressed: () {
-                  _searchController.clear();
-                  setState(() {
-                    _searchQuery = '';
-                    _updateFilteredSessions();
-                  });
-                },
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
+            placeholder: '搜索会话',
+            prefix: const Icon(fluent.WindowsIcons.search),
+            suffix: fluent.IconButton(
+              icon: const Icon(Icons.clear),
+              onPressed: () {
+                _searchController.clear();
+                setState(() {
+                  _searchQuery = '';
+                  _updateFilteredSessions();
+                });
+              },
             ),
             onChanged: (value) {
               setState(() {
@@ -269,22 +266,21 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
   }
 
   void _showDeleteConfirmation(SessionItem sessionItem) {
-    showDialog(
+    fluent.showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => fluent.ContentDialog(
         title: const Text('删除会话'),
         content: Text('确定要删除 "${sessionItem.title}" 吗？'),
         actions: [
-          TextButton(
+          fluent.Button(
             onPressed: () => Navigator.pop(context),
             child: const Text('取消'),
           ),
-          ElevatedButton(
+          fluent.FilledButton(
             onPressed: () {
               Navigator.pop(context);
               _deleteSession(sessionItem);
             },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('删除'),
           ),
         ],
@@ -586,33 +582,32 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
   Widget build(BuildContext context) {
     final bool isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('消息'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search),
+    return FluentScreen(
+      title: const Text('消息'),
+      commands: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          fluent.IconButton(
+            icon: const Icon(fluent.WindowsIcons.search),
             onPressed: _showSearch,
           ),
-          IconButton(
-            icon: const Icon(Icons.add),
+          fluent.IconButton(
+            icon: const Icon(fluent.WindowsIcons.add),
             onPressed: _createSession,
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+      content: _isLoading
+          ? const Center(child: fluent.ProgressRing())
           : _allSessions.isEmpty
               ? _buildEmptyState(isDarkMode)
               : RefreshIndicator(
                   onRefresh: _loadSessions,
                   child: ListView.builder(
-                    // 添加缓存区域优化滚动性能
                     cacheExtent: 150,
                     itemCount: _allSessions.length,
                     itemBuilder: (context, index) {
                       final session = _allSessions[index];
-                      // 使用 RepaintBoundary 隔离重绘
                       return RepaintBoundary(
                         child: _buildSessionItem(session, session.key),
                       );
@@ -641,10 +636,16 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
             ),
           ),
           const SizedBox(height: 8),
-          ElevatedButton.icon(
+          fluent.FilledButton(
             onPressed: _createSession,
-            icon: const Icon(Icons.add),
-            label: const Text('新建会话'),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(fluent.WindowsIcons.add, size: 16),
+                SizedBox(width: 8),
+                Text('新建会话'),
+              ],
+            ),
           ),
         ],
       ),

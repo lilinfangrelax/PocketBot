@@ -10,6 +10,7 @@ import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/services/websocket_service.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
+import 'package:pocket_bot/widgets/fluent_page.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/widgets/attachment_widget.dart';
 import 'package:pocket_bot/widgets/markdown_message_widget.dart';
@@ -985,15 +986,13 @@ class _ChatScreenState extends State<ChatScreen> {
     // 总共占用 128 (56 + 8 + 56 = 120，额外考虑 SafeArea 等)
     final maxWidth = MediaQuery.of(context).size.width - 128;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          wsService.activeSession?.customTitle?.isNotEmpty == true
-              ? wsService.activeSession!.customTitle!
-              : 'PocketBot',
-        ),
+    return FluentScreen(
+      title: Text(
+        wsService.activeSession?.customTitle?.isNotEmpty == true
+            ? wsService.activeSession!.customTitle!
+            : 'PocketBot',
       ),
-      body: Column(
+      content: Column(
         children: [
           // Session info banner
           _buildSessionInfoBanner(isDarkMode, wsService),

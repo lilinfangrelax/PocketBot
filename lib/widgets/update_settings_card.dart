@@ -1,5 +1,7 @@
+import 'package:fluent_ui/fluent_ui.dart' as fluent;
 import 'package:flutter/material.dart';
 import 'package:pocket_bot/config/update_config.dart';
+import 'package:pocket_bot/theme/fluent_theme.dart';
 import 'package:pocket_bot/services/github_update_service.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -125,9 +127,7 @@ class _UpdateSettingsCardState extends State<UpdateSettingsCard> {
   }
 
   void _snack(BuildContext context, String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    showAppNotice(context, message);
   }
 }
 
@@ -201,9 +201,7 @@ class UpdateDialogs {
         final opened = await updater.openReleasePage(result.release);
         if (!context.mounted) return;
         if (!opened) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('无法打开 GitHub 发布页')),
-          );
+          showAppNotice(context, '无法打开 GitHub 发布页');
         }
         return;
       }
@@ -224,21 +222,22 @@ class UpdateDialogs {
 
     final progressNotifier = ValueNotifier<double>(0);
 
-    showDialog<void>(
+    fluent.showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (context) {
-        return AlertDialog(
+        return fluent.ContentDialog(
           title: const Text('正在下载'),
           content: ValueListenableBuilder<double>(
             valueListenable: progressNotifier,
             builder: (context, value, _) {
+              final percent = (value * 100).clamp(0, 100).toDouble();
               return Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  LinearProgressIndicator(value: value <= 0 ? null : value),
+                  fluent.ProgressBar(value: percent <= 0 ? null : percent),
                   const SizedBox(height: 12),
-                  Text('${(value * 100).clamp(0, 100).toInt()}%'),
+                  Text('${percent.toInt()}%'),
                 ],
               );
             },
@@ -259,9 +258,7 @@ class UpdateDialogs {
 
       if (file == null) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('下载中断，再次检查更新会接着下载')),
-          );
+          showAppNotice(context, '下载中断，再次检查更新会接着下载');
         }
         return;
       }
@@ -269,24 +266,18 @@ class UpdateDialogs {
       final opened = await updater.installOrOpen(file);
       if (!context.mounted) return;
       if (!opened) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已保存：${file.path}')),
-        );
+        showAppNotice(context, '已保存：${file.path}');
         return;
       }
 
       if (result.platform == UpdatePlatform.windows) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已下载，请解压后替换当前安装目录')),
-        );
+        showAppNotice(context, '已下载，请解压后替换当前安装目录');
       }
     } catch (e) {
       Logger.error('[Update] Download/install error: $e');
       if (context.mounted) {
         Navigator.of(context, rootNavigator: true).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('出错：$e')),
-        );
+        showAppNotice(context, '出错：$e');
       }
     } finally {
       progressNotifier.dispose();

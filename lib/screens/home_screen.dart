@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:fluent_ui/fluent_ui.dart' as fluent;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -15,6 +16,7 @@ import 'package:pocket_bot/services/cursor_agent.dart';
 import 'package:pocket_bot/services/ssh_remote_session.dart';
 import 'package:pocket_bot/services/websocket_service.dart' as ws;
 import 'package:pocket_bot/theme/fluent_theme.dart';
+import 'package:pocket_bot/widgets/fluent_page.dart';
 
 typedef ConnectionState = ws.ConnectionState;
 
@@ -126,19 +128,22 @@ class _HomeScreenState extends State<HomeScreen> {
       selector: (_, manager) => manager.state,
       builder: (context, state, child) {
         final manager = context.read<ConnectionManager>();
-        return Scaffold(
-          appBar: AppBar(
-            title: const Text('PocketBot'),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.refresh),
-                tooltip: '刷新状态',
-                onPressed: manager.isCheckingStatus
-                    ? null
-                    : () => manager.checkGatewaysStatus(),
+        return FluentScreen(
+          title: const Text('PocketBot'),
+          commands: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              fluent.Tooltip(
+                message: '刷新状态',
+                child: fluent.IconButton(
+                  icon: const Icon(fluent.WindowsIcons.refresh),
+                  onPressed: manager.isCheckingStatus
+                      ? null
+                      : () => manager.checkGatewaysStatus(),
+                ),
               ),
-              IconButton(
-                icon: const Icon(Icons.settings),
+              fluent.IconButton(
+                icon: const Icon(fluent.WindowsIcons.settings),
                 onPressed: () {
                   Navigator.push(
                     context,
@@ -148,7 +153,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
           ),
-          body: _buildBody(manager),
+          content: _buildBody(manager),
         );
       },
     );
@@ -333,7 +338,7 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
-              child: ElevatedButton.icon(
+              child: fluent.FilledButton(
                 onPressed: manager.state == ConnectionState.connecting
                     ? null
                     : () => manager.connectTo(GatewayInfo.local(
@@ -342,8 +347,14 @@ class _HomeScreenState extends State<HomeScreen> {
                           agentId: _agentId,
                           agentLabel: _agentLabel,
                         )),
-                icon: const Icon(Icons.play_arrow),
-                label: Text('启动 $_agentLabel'),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.play_arrow, size: 16),
+                    const SizedBox(width: 8),
+                    Text('启动 $_agentLabel'),
+                  ],
+                ),
               ),
             ),
           ],
@@ -430,7 +441,7 @@ class _HomeScreenState extends State<HomeScreen> {
             SizedBox(
               width: 20,
               height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2, color: color),
+              child: fluent.ProgressRing(strokeWidth: 2, activeColor: color),
             )
           else
             Icon(icon, color: color, size: 20),
@@ -609,7 +620,7 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
-              child: ElevatedButton(
+              child: fluent.FilledButton(
                 onPressed: _manualHost.isNotEmpty && _manualUsername.isNotEmpty
                     ? () => _startSshFlow(manager)
                     : null,
@@ -628,20 +639,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }) async {
     final target = _withSelectedAgent(existing ?? _buildSshTarget());
     if (target.requiresAuth) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请填写 SSH 密码或私钥')),
-      );
+      showAppNotice(context, '请填写 SSH 密码或私钥');
       return;
     }
 
     var loadingShown = true;
-    showDialog<void>(
+    fluent.showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const AlertDialog(
+      builder: (_) => const fluent.ContentDialog(
         content: Row(
           children: [
-            CircularProgressIndicator(),
+            fluent.ProgressRing(),
             SizedBox(width: 16),
             Expanded(child: Text('正在登录远程主机...')),
           ],
@@ -680,9 +689,7 @@ class _HomeScreenState extends State<HomeScreen> {
       await session?.close();
       if (!mounted) return;
       if (loadingShown) Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_simplifyError(error.toString()))),
-      );
+      showAppNotice(context, _simplifyError(error.toString()));
     }
   }
 
@@ -945,7 +952,7 @@ class _GatewayListTile extends StatelessWidget {
                 const SizedBox(
                   width: 16,
                   height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+                  child: fluent.ProgressRing(strokeWidth: 2),
                 ),
               const SizedBox(width: 8),
               if (!isConnected && !isConnecting)

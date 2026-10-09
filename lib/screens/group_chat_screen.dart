@@ -1,9 +1,11 @@
+import 'package:fluent_ui/fluent_ui.dart' as fluent;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:pocket_bot/models/group_chat.dart';
 import 'package:pocket_bot/services/group_chat_service.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
+import 'package:pocket_bot/widgets/fluent_page.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/widgets/chat_bubble_widget.dart';
 
@@ -180,12 +182,10 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     final colors = FluentColors.of(context);
     final messageItems = _buildMessageItems();
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_group?.name ?? '群聊'),
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+    return FluentScreen(
+      title: Text(_group?.name ?? '群聊'),
+      content: _isLoading
+          ? const Center(child: fluent.ProgressRing())
           : Column(
               children: [
                 // 消息列表

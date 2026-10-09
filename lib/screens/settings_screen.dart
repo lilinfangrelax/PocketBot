@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:fluent_ui/fluent_ui.dart' as fluent;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -11,6 +12,7 @@ import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/utils/version_utils.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
+import 'package:pocket_bot/widgets/fluent_page.dart';
 import 'package:pocket_bot/widgets/update_settings_card.dart';
 
 /// Settings screen
@@ -106,9 +108,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// Show avatar options dialog
   void _showAvatarOptions() {
-    showDialog(
+    fluent.showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      barrierDismissible: true,
+      builder: (context) => fluent.ContentDialog(
         title: const Text('头像'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -125,22 +128,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              ElevatedButton.icon(
+              fluent.FilledButton(
                 onPressed: () {
                   Navigator.pop(context);
                   _pickAndSaveAvatar();
                 },
-                icon: const Icon(Icons.change_circle),
-                label: const Text('更换照片'),
+                child: const Text('更换照片'),
               ),
               const SizedBox(height: 8),
-              TextButton.icon(
+              fluent.Button(
                 onPressed: () {
                   Navigator.pop(context);
                   _showRemoveConfirmDialog();
                 },
-                icon: const Icon(Icons.delete, color: Colors.red),
-                label: const Text('移除', style: TextStyle(color: Colors.red)),
+                child: Text(
+                  '移除',
+                  style: TextStyle(color: FluentColors.of(context).danger),
+                ),
               ),
             ] else ...[
               SizedBox(
@@ -153,39 +157,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              ElevatedButton.icon(
+              fluent.FilledButton(
                 onPressed: () {
                   Navigator.pop(context);
                   _pickAndSaveAvatar();
                 },
-                icon: const Icon(Icons.add_photo_alternate),
-                label: const Text('选择照片'),
+                child: const Text('选择照片'),
               ),
             ],
           ],
         ),
+        actions: [
+          fluent.Button(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+        ],
       ),
     );
   }
 
   /// Show remove confirmation dialog
   void _showRemoveConfirmDialog() {
-    showDialog(
+    fluent.showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      barrierDismissible: true,
+      builder: (context) => fluent.ContentDialog(
         title: const Text('移除头像？'),
         content: const Text('确定要移除当前头像吗？'),
         actions: [
-          TextButton(
+          fluent.Button(
             onPressed: () => Navigator.pop(context),
             child: const Text('取消'),
           ),
-          ElevatedButton(
+          fluent.FilledButton(
             onPressed: () async {
               Navigator.pop(context);
               await _removeAvatar();
             },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('移除'),
           ),
         ],
@@ -198,11 +207,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final themeProvider = context.watch<ThemeProvider>();
     final currentMode = themeProvider.themeMode;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('设置'),
-      ),
-      body: ListView(
+    return FluentScreen(
+      title: const Text('设置'),
+      content: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           const UpdateSettingsCard(),
@@ -244,14 +251,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onTap: _showAvatarOptions,
                 ),
                 const Divider(),
-                SwitchListTile(
-                  secondary: const Icon(Icons.notifications),
+                ListTile(
+                  leading: const Icon(Icons.notifications),
                   title: const Text('通知'),
                   subtitle: const Text('显示新消息通知'),
-                  value: true,
-                  onChanged: (value) {
-                    // TODO: Implement notifications
-                  },
+                  trailing: fluent.ToggleSwitch(
+                    checked: true,
+                    onChanged: (value) {
+                      // TODO: Implement notifications
+                    },
+                  ),
                 ),
                 const Divider(),
                 ListTile(
@@ -327,8 +336,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   leading: const Icon(Icons.bug_report),
                   title: const Text('调试模式'),
                   subtitle: const Text('输出详细日志'),
-                  trailing: Switch(
-                    value: false,
+                  trailing: fluent.ToggleSwitch(
+                    checked: false,
                     onChanged: (value) {
                       // TODO: Toggle debug mode
                     },
@@ -365,60 +374,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _showThemeDialog(BuildContext context) {
     final themeProvider = context.read<ThemeProvider>();
 
-    showDialog(
+    fluent.showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      barrierDismissible: true,
+      builder: (context) => fluent.ContentDialog(
         title: const Text('选择主题'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            RadioListTile(
-              title: const Row(
-                children: [
-                  Icon(Icons.light_mode),
-                  SizedBox(width: 8),
-                  Text('浅色'),
-                ],
+        content: RadioGroup<ThemeMode>(
+          groupValue: themeProvider.themeMode,
+          onChanged: (value) {
+            if (value == null) return;
+            themeProvider.setThemeMode(value);
+            Navigator.pop(context);
+          },
+          child: const Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              fluent.RadioButton<ThemeMode>(
+                value: ThemeMode.light,
+                content: Text('浅色'),
               ),
-              value: ThemeMode.light,
-              groupValue: themeProvider.themeMode,
-              onChanged: (value) {
-                themeProvider.setThemeMode(ThemeMode.light);
-                Navigator.pop(context);
-              },
-            ),
-            RadioListTile(
-              title: const Row(
-                children: [
-                  Icon(Icons.dark_mode),
-                  SizedBox(width: 8),
-                  Text('深色'),
-                ],
+              SizedBox(height: 12),
+              fluent.RadioButton<ThemeMode>(
+                value: ThemeMode.dark,
+                content: Text('深色'),
               ),
-              value: ThemeMode.dark,
-              groupValue: themeProvider.themeMode,
-              onChanged: (value) {
-                themeProvider.setThemeMode(ThemeMode.dark);
-                Navigator.pop(context);
-              },
-            ),
-            RadioListTile(
-              title: const Row(
-                children: [
-                  Icon(Icons.brightness_auto),
-                  SizedBox(width: 8),
-                  Text('跟随系统'),
-                ],
+              SizedBox(height: 12),
+              fluent.RadioButton<ThemeMode>(
+                value: ThemeMode.system,
+                content: Text('跟随系统'),
               ),
-              value: ThemeMode.system,
-              groupValue: themeProvider.themeMode,
-              onChanged: (value) {
-                themeProvider.setThemeMode(ThemeMode.system);
-                Navigator.pop(context);
-              },
-            ),
-          ],
+            ],
+          ),
         ),
+        actions: [
+          fluent.Button(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+        ],
       ),
     );
   }
@@ -439,29 +433,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _clearAllSessions(BuildContext context) {
-    showDialog(
+    fluent.showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      barrierDismissible: true,
+      builder: (context) => fluent.ContentDialog(
         title: const Text('清除全部会话'),
         content: const Text(
           '确定要删除本机保存的全部聊天记录吗？此操作无法撤销。',
         ),
         actions: [
-          TextButton(
+          fluent.Button(
             onPressed: () => Navigator.pop(context),
             child: const Text('取消'),
           ),
-          ElevatedButton(
+          fluent.FilledButton(
             onPressed: () async {
               await SessionStorage.clearAllSessions();
 
               final wsService = context.read<ConnectionManager>().wsService;
               wsService.clearAllSessions();
 
+              if (!context.mounted) return;
               Navigator.pop(context);
               _showSnackBar(context, '已清除全部会话');
             },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('清除'),
           ),
         ],
@@ -470,8 +465,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _showSnackBar(BuildContext context, String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    showAppNotice(context, message);
   }
 }

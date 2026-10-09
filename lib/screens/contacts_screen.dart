@@ -1,3 +1,4 @@
+import 'package:fluent_ui/fluent_ui.dart' as fluent;
 import 'package:flutter/material.dart';
 import 'package:pocket_bot/services/contact_service.dart';
 import 'package:pocket_bot/models/contact.dart';
@@ -6,6 +7,7 @@ import 'package:pocket_bot/screens/create_contact_screen.dart';
 import 'package:pocket_bot/screens/create_group_screen.dart';
 import 'package:pocket_bot/screens/group_chat_list.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
+import 'package:pocket_bot/widgets/fluent_page.dart';
 
 // ============ 常量定义 ============
 const double _kSpacingMedium = 16;
@@ -58,57 +60,49 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    showAppNotice(context, message);
   }
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Scaffold(
-        body: Column(
-          children: [
-            // 工具栏：创建群聊、添加联系人
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.group_add),
-                    tooltip: '创建群聊',
-                    onPressed: _navigateToCreateGroup,
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.person_add),
-                    tooltip: '添加联系人',
-                    onPressed: _navigateToCreateContact,
-                  ),
-                ],
-              ),
+    return FluentScreen(
+      title: const Text('通讯录'),
+      commands: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          fluent.Tooltip(
+            message: '创建群聊',
+            child: fluent.IconButton(
+              icon: const Icon(fluent.WindowsIcons.group),
+              onPressed: _navigateToCreateGroup,
             ),
-            // 搜索框
-            Padding(
-              padding: const EdgeInsets.all(_kSpacingMedium),
-              child: TextField(
-                controller: _searchController,
-                decoration: const InputDecoration(
-                  hintText: '搜索联系人...',
-                  prefixIcon: Icon(Icons.search),
-                  border: OutlineInputBorder(),
-                ),
-                onChanged: _searchContacts,
-              ),
+          ),
+          fluent.Tooltip(
+            message: '添加联系人',
+            child: fluent.IconButton(
+              icon: const Icon(fluent.WindowsIcons.add_friend),
+              onPressed: _navigateToCreateContact,
             ),
-            // 联系人列表
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _buildContactList(),
+          ),
+        ],
+      ),
+      content: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: _kSpacingMedium),
+            child: fluent.TextBox(
+              controller: _searchController,
+              placeholder: '搜索联系人...',
+              prefix: const Icon(fluent.WindowsIcons.search),
+              onChanged: _searchContacts,
             ),
-          ],
-        ),
+          ),
+          Expanded(
+            child: _isLoading
+                ? const Center(child: fluent.ProgressRing())
+                : _buildContactList(),
+          ),
+        ],
       ),
     );
   }

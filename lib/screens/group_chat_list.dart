@@ -1,5 +1,7 @@
+import 'package:fluent_ui/fluent_ui.dart' as fluent;
 import 'package:flutter/material.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
+import 'package:pocket_bot/widgets/fluent_page.dart';
 import 'package:pocket_bot/models/group_chat.dart';
 import 'package:pocket_bot/services/group_chat_service.dart';
 import 'package:pocket_bot/screens/group_chat_screen.dart';
@@ -35,27 +37,21 @@ class _GroupChatListScreenState extends State<GroupChatListScreen> {
     } catch (e) {
       setState(() => _isLoading = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('加载群聊失败: $e')),
-        );
+        showAppNotice(context, '加载群聊失败: $e');
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('群聊'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: _showCreateGroupDialog,
-          ),
-        ],
+    return FluentScreen(
+      title: const Text('群聊'),
+      commands: fluent.IconButton(
+        icon: const Icon(fluent.WindowsIcons.add),
+        onPressed: _showCreateGroupDialog,
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+      content: _isLoading
+          ? const Center(child: fluent.ProgressRing())
           : _groups.isEmpty
               ? _buildEmptyState()
               : _buildGroupList(),
@@ -71,10 +67,16 @@ class _GroupChatListScreenState extends State<GroupChatListScreen> {
           const SizedBox(height: 16),
           Text('暂无群聊', style: TextStyle(color: Colors.grey[600])),
           const SizedBox(height: 8),
-          ElevatedButton.icon(
+          fluent.FilledButton(
             onPressed: _showCreateGroupDialog,
-            icon: const Icon(Icons.add),
-            label: const Text('创建群聊'),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(fluent.WindowsIcons.add, size: 16),
+                SizedBox(width: 8),
+                Text('创建群聊'),
+              ],
+            ),
           ),
         ],
       ),
@@ -112,16 +114,12 @@ class _GroupChatListScreenState extends State<GroupChatListScreen> {
     try {
       await _groupChatService.showGroupInSessionList(group.id);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已将 "${group.name}" 恢复到会话列表')),
-        );
+        showAppNotice(context, '已将 "${group.name}" 恢复到会话列表');
         _loadGroups();
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('操作失败: $e')),
-        );
+        showAppNotice(context, '操作失败: $e');
       }
     }
   }

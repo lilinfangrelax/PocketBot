@@ -1,5 +1,6 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
+import 'package:fluent_ui/fluent_ui.dart';
+import 'package:flutter/material.dart' as material;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pocket_bot/config/update_config.dart';
@@ -114,7 +115,7 @@ class _PocketBotAppState extends State<PocketBotApp> {
   Widget build(BuildContext context) {
     final themeMode = context.watch<ThemeProvider>().themeMode;
 
-    return MaterialApp(
+    return FluentApp(
       title: 'PocketBot',
       navigatorKey: appNavigatorKey,
       theme: buildFluentTheme(Brightness.light),
@@ -122,6 +123,18 @@ class _PocketBotAppState extends State<PocketBotApp> {
       themeMode: themeMode,
       home: const MainScreen(),
       debugShowCheckedModeBanner: false,
+      builder: (context, child) {
+        final brightness = FluentTheme.of(context).brightness;
+        return material.ScaffoldMessenger(
+          child: material.Theme(
+            data: buildMaterialTheme(brightness),
+            child: material.Material(
+              type: material.MaterialType.transparency,
+              child: child ?? const SizedBox.shrink(),
+            ),
+          ),
+        );
+      },
     );
   }
 }

@@ -3,7 +3,7 @@ description: A modern mobile client for Agent Client Protocol (ACP) agents, buil
 
 publish_to: 'none'
 
-version: 1.2.10-beta
+version: 1.2.11-beta
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -39,7 +39,9 @@ dependencies:
   permission_handler: ^11.1.0
   package_info_plus: ^5.0.1
   path_provider: ^2.1.1
-  intl: ^0.18.1
+  intl: ^0.20.2
+  # 4.16 needs Flutter 3.44 APIs. CI builds with Flutter 3.38.
+  fluent_ui: 4.15.1
   logger: ^2.0.2
   flutter_local_notifications: ^17.0.0
   flutter_markdown: ^0.7.3
