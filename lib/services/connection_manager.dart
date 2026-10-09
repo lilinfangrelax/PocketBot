@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pocket_bot/config/gateway_config.dart';
 import 'package:pocket_bot/config/mcp_config.dart';
 import 'package:pocket_bot/config/session_storage.dart';
+import 'package:pocket_bot/models/ai_contact_config.dart';
 import 'package:pocket_bot/models/mcp_server_config.dart';
 import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/services/acp_registry.dart';
@@ -38,6 +39,11 @@ class ConnectionManager extends ChangeNotifier {
   String? _errorMessage;
   List<GatewayInfo> _savedGateways = [];
   final Map<String, GatewayStatus> _gatewayStatuses = {};
+
+  /// Extra agent connections that stay open next to [wsService], keyed by
+  /// [profileKey]. Contacts and group members talk to their agent here.
+  final Map<String, ws.WebSocketService> _pool = {};
+  final Map<String, Future<ws.WebSocketService>> _opening = {};
   bool _isCheckingStatus = false;
 
   ws.ConnectionState get state => _state;
@@ -85,15 +91,109 @@ class ConnectionManager extends ChangeNotifier {
 
   Future<void> saveMcpServers(List<McpServerConfig> servers) async {
     _wsService.mcpServers = servers;
+    for (final service in _pool.values) {
+      service.mcpServers = servers;
+    }
     notifyListeners();
     await McpConfig.save(servers);
   }
 
   Future<void> setAutoApprovePermissions(bool value) async {
     _wsService.autoApprovePermissions = value;
+    for (final service in _pool.values) {
+      service.autoApprovePermissions = value;
+    }
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_autoApproveKey, value);
+  }
+
+  /// Identifies one running agent: where it runs, in which folder, which agent.
+  static String profileKey(GatewayInfo gateway) =>
+      '${gateway.connectionId}|${gateway.workingDirectory.trim()}|${gateway.agentId}';
+
+  /// The saved connection a contact is bound to, narrowed to its folder and
+  /// agent. Null when the contact has no binding or the connection was deleted.
+  GatewayInfo? profileForContact(AIContactConfig config) {
+    if (!config.hasAgent) return null;
+    GatewayInfo? base;
+    for (final gateway in _savedGateways) {
+      if (gateway.connectionId == config.gatewayId) base = gateway;
+    }
+    if (base == null) return null;
+    return base.copyWith(
+      workingDirectory: config.workingDirectory.trim().isEmpty
+          ? base.workingDirectory
+          : config.workingDirectory.trim(),
+      agentId: config.agentId.isEmpty ? base.agentId : config.agentId,
+      agentLabel:
+          config.agentLabel.isEmpty ? base.agentLabel : config.agentLabel,
+    );
+  }
+
+  bool _primaryServes(GatewayInfo profile) {
+    final current = _gateway;
+    return current != null &&
+        _wsService.isConnected &&
+        profileKey(current) == profileKey(profile);
+  }
+
+  /// The connection already serving [profile], if any.
+  ws.WebSocketService? serviceFor(GatewayInfo profile) {
+    if (_primaryServes(profile)) return _wsService;
+    return _pool[profileKey(profile)];
+  }
+
+  List<ws.WebSocketService> get pooledServices => List.unmodifiable(_pool.values);
+
+  /// Returns a connected service for [profile], reusing the primary
+  /// connection or an open pooled one, and connecting otherwise.
+  Future<ws.WebSocketService> connectProfile(GatewayInfo profile) {
+    if (_primaryServes(profile)) return Future.value(_wsService);
+    final key = profileKey(profile);
+    final existing = _pool[key];
+    if (existing != null && existing.isConnected) {
+      return Future.value(existing);
+    }
+    return _opening[key] ??= _openPooled(key, profile, existing)
+        .whenComplete(() => _opening.remove(key));
+  }
+
+  Future<ws.WebSocketService> _openPooled(
+    String key,
+    GatewayInfo profile,
+    ws.WebSocketService? existing,
+  ) async {
+    final service = existing ?? ws.WebSocketService();
+    service
+      ..autoApprovePermissions = _wsService.autoApprovePermissions
+      ..mcpServers = _wsService.mcpServers;
+    _pool[key] = service;
+    notifyListeners();
+    try {
+      var prepared = profile;
+      if (profile.kind == AgentTransportKind.local &&
+          profile.agentId.isNotEmpty) {
+        prepared = await prepareGatewayLaunch(profile, localRemotePlatform());
+      }
+      await service.connectTarget(prepared);
+      Logger.info('Pooled connection ready: ${profile.displayLabel}');
+      return service;
+    } catch (error) {
+      final message = service.errorMessage ??
+          error.toString().replaceFirst('Exception: ', '');
+      throw Exception(message);
+    } finally {
+      notifyListeners();
+    }
+  }
+
+  Future<void> disconnectProfile(GatewayInfo profile) async {
+    final service = _pool.remove(profileKey(profile));
+    if (service == null) return;
+    service.cancelReconnect();
+    await service.disconnect();
+    notifyListeners();
   }
 
   Future<void> _loadSavedGateways() async {

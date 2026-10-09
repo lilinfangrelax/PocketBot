@@ -71,7 +71,13 @@ class _MessageItem {
 
 /// Chat screen - Conversation with an ACP Agent
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key});
+  const ChatScreen({super.key, this.service, this.profile});
+
+  /// Connection to chat over. Defaults to the primary connection.
+  final WebSocketService? service;
+
+  /// Saved connection behind [service], used by the reconnect button.
+  final GatewayInfo? profile;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -104,7 +110,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     // Cache wsService reference to avoid context access in async callbacks
-    _wsService = context.read<ConnectionManager>().wsService;
+    _wsService = widget.service ?? context.read<ConnectionManager>().wsService;
     _listenToMessages();
     _scrollController.addListener(_onScroll);
     _loadUserAvatar(); // Load user avatar
@@ -979,7 +985,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final connectionManager = context.watch<ConnectionManager>();
-    final wsService = connectionManager.wsService;
+    final wsService = _wsService ?? connectionManager.wsService;
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     final colors = FluentColors.of(context);
     // 气泡最大宽度：屏幕宽度减去两个头像、边距及气泡间隔的距离
@@ -1007,8 +1013,7 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
 
           // Connection status banner - WeChat style
-          if (!connectionManager.wsService.isConnected &&
-              !connectionManager.wsService.isReconnecting)
+          if (!wsService.isConnected && !wsService.isReconnecting)
             Container(
               color: colors.warningSurface,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -1024,7 +1029,12 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                   TextButton(
                     onPressed: () {
-                      if (connectionManager.gateway != null) {
+                      final profile = widget.profile;
+                      if (profile != null) {
+                        connectionManager.connectProfile(profile).catchError(
+                              (Object error) => wsService,
+                            );
+                      } else if (connectionManager.gateway != null) {
                         connectionManager.connectTo(connectionManager.gateway!);
                       }
                     },
@@ -1035,7 +1045,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
 
           // Auto-reconnect countdown banner
-          if (connectionManager.wsService.isReconnecting)
+          if (wsService.isReconnecting)
             Container(
               color: colors.infoSurface,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -1045,7 +1055,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      '自动重连中 ${connectionManager.wsService.reconnectCountdown} 秒...',
+                      '自动重连中 ${wsService.reconnectCountdown} 秒...',
                       style: TextStyle(color: colors.textPrimary, fontSize: 13),
                     ),
                   ),
@@ -1702,9 +1712,9 @@ class _ChatScreenState extends State<ChatScreen> {
       connectionManager = null;
     }
 
-    if (connectionManager != null) {
-      final wsService = connectionManager.wsService;
-      final activeSession = wsService.activeSession;
+    final service = _wsService ?? connectionManager?.wsService;
+    if (service != null) {
+      final activeSession = service.activeSession;
       if (activeSession != null && _scrollController.hasClients) {
         activeSession.scrollOffset = _scrollController.position.pixels;
         SessionStorage.saveSession(activeSession.toChatSession());
@@ -1713,9 +1723,8 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     // Step 1 fix: clean up all listener/subscription refs
-    if (connectionManager != null) {
-      final wsService = connectionManager.wsService;
-      if (_wsListener != null) wsService.removeListener(_wsListener!);
+    if (service != null && _wsListener != null) {
+      service.removeListener(_wsListener!);
     }
     _messageSub?.cancel();
     _messageUpdateSub?.cancel();
