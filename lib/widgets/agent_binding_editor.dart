@@ -6,8 +6,9 @@ import 'package:pocket_bot/services/acp_registry.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
 
-/// Which agent an AI contact talks to: a saved connection, a folder on that
-/// machine, and an ACP registry agent.
+/// Which agent an AI contact talks to: an ACP registry agent plus the host
+/// and folder used for its one-to-one chat. In a group with its own folder
+/// the contact runs on the group's host instead.
 class AgentBinding {
   final String gatewayId;
   final String workingDirectory;
@@ -120,7 +121,8 @@ class _AgentBindingEditorState extends State<AgentBindingEditor> {
           initialValue: _gateway?.connectionId,
           isExpanded: true,
           decoration: const InputDecoration(
-            labelText: '运行在',
+            labelText: '默认主机',
+            helperText: '单聊使用；群聊设置了目录时用群聊的主机',
             border: OutlineInputBorder(),
           ),
           items: [
@@ -147,8 +149,9 @@ class _AgentBindingEditorState extends State<AgentBindingEditor> {
         TextField(
           controller: _directory,
           decoration: const InputDecoration(
-            labelText: '工作目录',
+            labelText: '单聊工作目录',
             hintText: '/home/me/project',
+            helperText: '群聊里使用群聊目录',
             border: OutlineInputBorder(),
           ),
           onChanged: (_) => _emit(),

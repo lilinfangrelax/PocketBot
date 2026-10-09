@@ -63,6 +63,13 @@ class AIContactService {
         // Column already exists.
       }
     }
+    try {
+      await _db.execute(
+        'ALTER TABLE contact_session_mappings ADD COLUMN working_directory TEXT',
+      );
+    } catch (_) {
+      // Column already exists.
+    }
   }
 
   /// 创建 AI 联系人
@@ -185,6 +192,7 @@ class AIContactService {
     required String contactId,
     required String groupId,
     required String sessionKey,
+    String workingDirectory = '',
   }) async {
     await _ensureTables();
     // 查询是否已存在映射
@@ -194,6 +202,7 @@ class AIContactService {
       // 更新映射
       final updated = existing.copyWith(
         sessionKey: sessionKey,
+        workingDirectory: workingDirectory,
         lastActiveAt: DateTime.now(),
         messageCount: existing.messageCount + 1,
       );
@@ -215,6 +224,7 @@ class AIContactService {
       contactId: contactId,
       groupId: groupId,
       sessionKey: sessionKey,
+      workingDirectory: workingDirectory,
       createdAt: now,
       lastActiveAt: now,
       messageCount: 1,

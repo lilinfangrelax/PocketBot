@@ -28,7 +28,13 @@ flutter run
 On the home screen:
 
 - **This computer**: choose a working directory and start the local agent
-- **SSH**: enter host, user, and password or private key, then pick a remote folder
+- **SSH**: enter host, user, and password or private key, then **Save and log in**. A host is online when its SSH login succeeds. Picking a folder and starting an agent is a separate step.
+
+Hosts, folders, and agents are independent:
+
+- One SSH login per host, shared by folder browsing and every agent on it
+- Each AI contact runs its own agent process per host
+- Each group chat can have a working folder (host + path). Every AI member answers there in its own ACP session (`session/new` with that `cwd`); changing the folder starts fresh sessions
 
 Credentials are stored on-device with Flutter Secure Storage. They are never sent in git.
 
