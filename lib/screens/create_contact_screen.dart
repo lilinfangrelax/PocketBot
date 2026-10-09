@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:pocket_bot/models/contact.dart';
+import 'package:pocket_bot/services/ai_contact_service.dart';
 import 'package:pocket_bot/services/contact_service.dart';
+import 'package:pocket_bot/widgets/agent_binding_editor.dart';
 
 /// 创建联系人页面
 class CreateContactScreen extends StatefulWidget {
@@ -14,6 +16,9 @@ class _CreateContactScreenState extends State<CreateContactScreen> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _atNameController = TextEditingController();
   bool _isLoading = false;
+  bool _isAI = false;
+  bool _autoReply = false;
+  AgentBinding? _binding;
 
   @override
   void dispose() {
@@ -31,24 +36,48 @@ class _CreateContactScreenState extends State<CreateContactScreen> {
       return;
     }
 
+    final binding = _binding;
+    if (_isAI && (binding == null || !binding.isComplete)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请为 AI 助手选择连接和代理')),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
     try {
       final contactService = ContactService();
-      final contact = await contactService.createContact(
-        name: name,
-        atName: _atNameController.text.trim().isEmpty
-            ? null
-            : _atNameController.text.trim(),
-      );
+      final atName = _atNameController.text.trim().isEmpty
+          ? null
+          : _atNameController.text.trim();
+      final Contact? contact;
+      if (_isAI && binding != null) {
+        final config = await AIContactService().createAIContact(
+          name: name,
+          atName: atName,
+          agentId: binding.agentId,
+          agentLabel: binding.agentLabel,
+          gatewayId: binding.gatewayId,
+          workingDirectory: binding.workingDirectory,
+          autoReply: _autoReply,
+        );
+        contact = await contactService.getContact(config.contactId);
+      } else {
+        contact = await contactService.createContact(
+          name: name,
+          atName: atName,
+        );
+      }
       if (mounted) {
         Navigator.pop(context, contact);
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('创建失败: $e')),
       );
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -89,6 +118,27 @@ class _CreateContactScreenState extends State<CreateContactScreen> {
                 border: OutlineInputBorder(),
               ),
             ),
+            const SizedBox(height: 16),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('AI 助手'),
+              subtitle: const Text('绑定一个 ACP 代理，私聊和群聊里由它回复'),
+              value: _isAI,
+              onChanged: (value) => setState(() => _isAI = value),
+            ),
+            if (_isAI) ...[
+              const SizedBox(height: 8),
+              AgentBindingEditor(
+                onChanged: (binding) => _binding = binding,
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('群聊中自动回复'),
+                subtitle: const Text('关闭时只在被 @ 时回复'),
+                value: _autoReply,
+                onChanged: (value) => setState(() => _autoReply = value),
+              ),
+            ],
             const SizedBox(height: 32),
             SizedBox(
               width: double.infinity,

@@ -1,9 +1,53 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:pocket_bot/models/ai_contact_config.dart';
 import 'package:pocket_bot/models/contact.dart';
 import 'package:pocket_bot/models/group_chat.dart';
+import 'package:pocket_bot/services/ai_contact_service.dart';
+import 'package:pocket_bot/services/connection_manager.dart';
+import 'package:pocket_bot/services/contact_agent_linker.dart';
 import 'package:pocket_bot/services/contact_service.dart';
 import 'package:pocket_bot/services/group_chat_service.dart';
+import 'package:pocket_bot/screens/chat_screen.dart';
 import 'package:pocket_bot/screens/group_chat_screen.dart';
+import 'package:pocket_bot/widgets/agent_binding_editor.dart';
+
+/// Opens the one-to-one agent chat for an AI [contact], connecting first if
+/// needed. Shows a snackbar instead when the contact cannot be reached.
+Future<void> openContactChat(BuildContext context, Contact contact) async {
+  final manager = context.read<ConnectionManager>();
+  final messenger = ScaffoldMessenger.of(context);
+  final navigator = Navigator.of(context);
+  messenger.showSnackBar(
+    SnackBar(
+      content: Text('正在连接 ${contact.name}…'),
+      duration: const Duration(seconds: 30),
+    ),
+  );
+  try {
+    final linker = ContactAgentLinker(manager);
+    final chat = await linker.openDirectChat(contact);
+    final config = await linker.configFor(contact.id);
+    messenger.hideCurrentSnackBar();
+    await navigator.push(
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(
+          service: chat.service,
+          profile: config == null ? null : manager.profileForContact(config),
+        ),
+      ),
+    );
+  } catch (error) {
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          '无法打开对话: ${error.toString().replaceFirst('Exception: ', '')}',
+        ),
+      ),
+    );
+  }
+}
 
 /// 联系人详情页面
 class ContactDetailScreen extends StatefulWidget {
@@ -22,6 +66,7 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
   bool _isLoading = true;
   List<ContactChangeLog> _changeLogs = [];
   List<GroupChat> _groups = [];
+  AIContactConfig? _config;
 
   @override
   void initState() {
@@ -41,6 +86,9 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
 
       // 获取该联系人所在的群聊
       _groups = await _groupChatService.getUserGroups(_contact.id);
+      if (_contact.isAI) {
+        _config = await AIContactService().getConfig(_contact.id);
+      }
     } catch (e) {
       _showError('加载失败: $e');
     } finally {
@@ -54,6 +102,123 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => GroupChatScreen(groupId: group.id)),
+    );
+  }
+
+  Future<void> _editBinding() async {
+    final config = _config;
+    if (config == null) return;
+    AgentBinding? binding;
+    final save = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          16 + MediaQuery.of(sheetContext).viewInsets.bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              '绑定代理',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            AgentBindingEditor(
+              initial: AgentBinding(
+                gatewayId: config.gatewayId,
+                workingDirectory: config.workingDirectory,
+                agentId: config.agentId,
+                agentLabel: config.agentLabel,
+              ),
+              onChanged: (value) => binding = value,
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(sheetContext, true),
+              child: const Text('保存'),
+            ),
+          ],
+        ),
+      ),
+    );
+    final chosen = binding;
+    if (save != true || chosen == null || !chosen.isComplete) return;
+    final changed = chosen.gatewayId != config.gatewayId ||
+        chosen.workingDirectory != config.workingDirectory ||
+        chosen.agentId != config.agentId;
+    try {
+      final updated = await AIContactService().updateConfig(
+        contactId: _contact.id,
+        agentId: chosen.agentId,
+        agentLabel: chosen.agentLabel,
+        gatewayId: chosen.gatewayId,
+        workingDirectory: chosen.workingDirectory,
+      );
+      if (changed) {
+        // Old sessions belong to the previous agent and cannot be resumed.
+        await AIContactService().deleteMappingsForContact(_contact.id);
+      }
+      if (mounted) setState(() => _config = updated);
+    } catch (e) {
+      _showError('保存失败: $e');
+    }
+  }
+
+  Widget _buildAgentCard(bool isDarkMode) {
+    final config = _config;
+    final manager = context.watch<ConnectionManager>();
+    final profile = config == null ? null : manager.profileForContact(config);
+    final String where;
+    if (config == null || !config.hasAgent) {
+      where = '还没有绑定代理';
+    } else if (profile == null) {
+      where = '绑定的连接已被删除';
+    } else {
+      final dir = profile.workingDirectory.isEmpty
+          ? ''
+          : ' · ${profile.workingDirectory}';
+      where = '${profile.name}$dir';
+    }
+    final agent = config == null
+        ? ''
+        : (config.agentLabel.isEmpty ? config.agentId : config.agentLabel);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: isDarkMode ? const Color(0xFF2D2D2D) : Colors.grey[100],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.smart_toy_outlined),
+            title: Text(agent.isEmpty ? 'AI 助手' : agent),
+            subtitle: Text(where),
+            trailing: config == null
+                ? null
+                : TextButton(
+                    onPressed: _editBinding,
+                    child: const Text('更换'),
+                  ),
+          ),
+          const SizedBox(height: 8),
+          ElevatedButton.icon(
+            onPressed: profile == null
+                ? null
+                : () => openContactChat(context, _contact),
+            icon: const Icon(Icons.chat_bubble_outline),
+            label: const Text('发消息'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -189,6 +354,10 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 24),
+                  if (_contact.isAI) ...[
+                    _buildAgentCard(isDarkMode),
+                    const SizedBox(height: 24),
+                  ],
                   // 所属群聊
                   if (_groups.isNotEmpty)
                     Container(

@@ -3,8 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:pocket_bot/config/session_storage.dart';
 import 'package:pocket_bot/models/message.dart';
+import 'package:pocket_bot/models/contact.dart';
 import 'package:pocket_bot/models/group_chat.dart';
 import 'package:pocket_bot/screens/chat_screen.dart';
+import 'package:pocket_bot/screens/contact_detail_screen.dart';
+import 'package:pocket_bot/services/ai_contact_service.dart';
+import 'package:pocket_bot/services/contact_service.dart';
 import 'package:pocket_bot/screens/group_chat_screen.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/services/group_chat_service.dart';
@@ -238,11 +242,18 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
     ).then((_) => _loadSessions());
   }
 
-  void _selectSession(SessionItem sessionItem) {
+  Future<void> _selectSession(SessionItem sessionItem) async {
     if (sessionItem.type == SessionItemType.group) {
       // 群聊
       _navigateToGroupChat(sessionItem.groupChat!);
     } else {
+      final contact = await _contactForSession(sessionItem.personalSession!.key);
+      if (!mounted) return;
+      if (contact != null) {
+        await openContactChat(context, contact);
+        if (mounted) _loadSessions();
+        return;
+      }
       // 个人会话
       final wsService = context.read<ConnectionManager>().wsService;
       // Deactivate current session first so incoming messages can be counted as unread
@@ -250,6 +261,19 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
       wsService.selectSession(sessionItem.personalSession!.key,
           agentId: sessionItem.personalSession!.agentId);
       _navigateToChat();
+    }
+  }
+
+  Future<Contact?> _contactForSession(String sessionKey) async {
+    try {
+      final contactId =
+          await AIContactService().contactForDirectSession(sessionKey);
+      if (contactId == null) return null;
+      final contact = await ContactService().getContact(contactId);
+      return contact != null && contact.isAI ? contact : null;
+    } catch (e) {
+      Logger.warning('[SessionList] Contact lookup failed: $e');
+      return null;
     }
   }
 
