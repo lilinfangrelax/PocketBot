@@ -541,8 +541,7 @@ class _HomeScreenState extends State<HomeScreen> {
           final current = manager.gateway?.connectionId == gw.connectionId;
           final presentation = describeSavedConnection(
             sessionLive: _sessionLive(manager, gw),
-            connecting:
-                current && manager.state == ConnectionState.connecting,
+            connecting: current && manager.state == ConnectionState.connecting,
             failed: current && manager.state == ConnectionState.error,
             hostReachable: _hostReachable(manager, gw),
             ssh: gw.kind == AgentTransportKind.ssh,
@@ -881,8 +880,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _passphraseController,
-                  decoration:
-                      const InputDecoration(labelText: '私钥密码（可选）'),
+                  decoration: const InputDecoration(labelText: '私钥密码（可选）'),
                   obscureText: true,
                   onChanged: (value) => _manualPassphrase = value,
                 ),
