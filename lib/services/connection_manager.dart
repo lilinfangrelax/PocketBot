@@ -59,8 +59,12 @@ class ConnectionManager extends ChangeNotifier {
   static const _autoApproveKey = 'acp_auto_approve_permissions';
 
   ConnectionManager() : _wsService = ws.WebSocketService() {
+    _wsService.addListener(_onPrimaryTransportChanged);
     _loadPreferences();
     _loadSavedGateways().then((_) {
+      // Probe after the list exists. The discover page used to check on the
+      // first frame, often before this load finished, and then never again.
+      unawaited(checkGatewaysStatus());
       final last = _gateway;
       if (last == null) return;
       if (last.kind == AgentTransportKind.ssh) {
@@ -70,6 +74,36 @@ class ConnectionManager extends ChangeNotifier {
       Logger.info('Auto-connecting to saved agent...');
       connectTo(last);
     });
+  }
+
+  /// Keep the page state on the primary transport. Loading a saved target
+  /// sets [_gateway] without opening a session; a later socket drop used to
+  /// leave this object on [ws.ConnectionState.connected].
+  void _onPrimaryTransportChanged() {
+    final reported = _wsService.state;
+    // connect() closes a previous transport while we are already connecting.
+    if (_state == ws.ConnectionState.connecting &&
+        reported == ws.ConnectionState.disconnected) {
+      return;
+    }
+    if (reported == _state &&
+        (reported != ws.ConnectionState.error ||
+            _errorMessage == _wsService.errorMessage)) {
+      return;
+    }
+    _state = reported;
+    if (reported == ws.ConnectionState.error) {
+      _errorMessage = _wsService.errorMessage ?? _errorMessage;
+    } else {
+      _errorMessage = null;
+    }
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _wsService.removeListener(_onPrimaryTransportChanged);
+    super.dispose();
   }
 
   Future<void> _loadPreferences() async {
@@ -209,6 +243,7 @@ class ConnectionManager extends ChangeNotifier {
     } catch (e) {
       Logger.warning('No saved agents found: $e');
     }
+    notifyListeners();
   }
 
   Future<void> checkGatewaysStatus() async {

@@ -13,6 +13,7 @@ import 'package:pocket_bot/screens/settings_screen.dart';
 import 'package:pocket_bot/services/acp_registry.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
+import 'package:pocket_bot/services/saved_connection_status.dart';
 import 'package:pocket_bot/services/ssh_host_keys.dart';
 import 'package:pocket_bot/services/ssh_remote_session.dart';
 import 'package:pocket_bot/services/websocket_service.dart' as ws;
@@ -128,42 +129,43 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Selector<ConnectionManager, ConnectionState>(
-      selector: (_, manager) => manager.state,
-      builder: (context, state, child) {
-        final manager = context.read<ConnectionManager>();
-        return FluentScreen(
-          title: const Text('PocketBot'),
-          commands: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              fluent.Tooltip(
-                message: '刷新状态',
-                child: fluent.IconButton(
-                  icon: const Icon(fluent.WindowsIcons.refresh),
-                  onPressed: manager.isCheckingStatus
-                      ? null
-                      : () => manager.checkGatewaysStatus(),
-                ),
-              ),
-              fluent.IconButton(
-                icon: const Icon(fluent.WindowsIcons.settings),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                  );
-                },
-              ),
-            ],
+    final manager = context.watch<ConnectionManager>();
+    return FluentScreen(
+      title: const Text('PocketBot'),
+      commands: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          fluent.Tooltip(
+            message: '刷新状态',
+            child: fluent.IconButton(
+              icon: const Icon(fluent.WindowsIcons.refresh),
+              onPressed: manager.isCheckingStatus
+                  ? null
+                  : () => manager.checkGatewaysStatus(),
+            ),
           ),
-          content: _buildBody(manager),
-        );
-      },
+          fluent.IconButton(
+            icon: const Icon(fluent.WindowsIcons.settings),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SettingsScreen()),
+              );
+            },
+          ),
+        ],
+      ),
+      content: _buildBody(manager),
     );
   }
 
   Widget _buildBody(ConnectionManager manager) {
+    // A restored gateway sets manager.gateway before any session exists.
+    // The header follows the transport, not that saved target.
+    if (manager.state == ConnectionState.connected &&
+        !manager.wsService.isConnected) {
+      return _buildDisconnectedView(manager);
+    }
     switch (manager.state) {
       case ConnectionState.connected:
         return _buildConnectedView(manager);
@@ -486,6 +488,18 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  bool _sessionLive(ConnectionManager manager, GatewayInfo gateway) {
+    return manager.state == ConnectionState.connected &&
+        manager.wsService.isConnected &&
+        manager.gateway?.connectionId == gateway.connectionId;
+  }
+
+  bool? _hostReachable(ConnectionManager manager, GatewayInfo gateway) {
+    final status = manager.getGatewayStatus(gateway);
+    if (status == null) return null;
+    return status.isOnline;
+  }
+
   Widget _buildGatewayList(ConnectionManager manager) {
     final saved = manager.savedGateways;
     final allGateways = <GatewayInfo>[];
@@ -505,22 +519,38 @@ class _HomeScreenState extends State<HomeScreen> {
       return const SizedBox.shrink();
     }
 
+    final sshTargets =
+        allGateways.where((gw) => gw.kind == AgentTransportKind.ssh);
+    final sshOnline = sshTargets.where((gw) {
+      return countsAsSshOnline(
+        sessionLive: _sessionLive(manager, gw),
+        hostReachable: _hostReachable(manager, gw),
+      );
+    }).length;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const FluentSectionHeader('已保存的连接'),
+        FluentSectionHeader(
+          savedConnectionsHeading(
+            sshCount: sshTargets.length,
+            sshOnline: sshOnline,
+          ),
+        ),
         ...allGateways.map((gw) {
-          final isConnected = manager.gateway != null &&
-              manager.gateway!.connectionId == gw.connectionId;
-          final status = manager.getGatewayStatus(gw);
-          final isOnline = status?.isOnline ?? false;
+          final current = manager.gateway?.connectionId == gw.connectionId;
+          final presentation = describeSavedConnection(
+            sessionLive: _sessionLive(manager, gw),
+            connecting:
+                current && manager.state == ConnectionState.connecting,
+            failed: current && manager.state == ConnectionState.error,
+            hostReachable: _hostReachable(manager, gw),
+            ssh: gw.kind == AgentTransportKind.ssh,
+          );
 
           return _GatewayListTile(
             gateway: gw,
-            isConnected: isConnected,
-            isOnline: isOnline,
-            isConnecting: manager.state == ConnectionState.connecting &&
-                manager.gateway?.connectionId == gw.connectionId,
+            presentation: presentation,
             onConnect: () {
               if (gw.kind == AgentTransportKind.ssh) {
                 _startSshFlow(manager, existing: gw);
@@ -920,26 +950,37 @@ class _HomeScreenState extends State<HomeScreen> {
 
 class _GatewayListTile extends StatelessWidget {
   final GatewayInfo gateway;
-  final bool isConnected;
-  final bool isOnline;
-  final bool isConnecting;
+  final SavedConnectionPresentation presentation;
   final VoidCallback onConnect;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
   const _GatewayListTile({
     required this.gateway,
-    required this.isConnected,
-    required this.isOnline,
-    required this.isConnecting,
+    required this.presentation,
     required this.onConnect,
     required this.onEdit,
     required this.onDelete,
   });
 
+  Color _toneColor(FluentColors colors) {
+    switch (presentation.tone) {
+      case SavedConnectionTone.success:
+        return colors.success;
+      case SavedConnectionTone.info:
+        return colors.info;
+      case SavedConnectionTone.danger:
+        return colors.danger;
+      case SavedConnectionTone.muted:
+        return colors.textTertiary;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = FluentColors.of(context);
+    final tone = _toneColor(colors);
+    final detail = presentation.detailLabel;
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: InkWell(
@@ -953,9 +994,7 @@ class _GatewayListTile extends StatelessWidget {
                 width: 10,
                 height: 10,
                 decoration: BoxDecoration(
-                  color: isConnected
-                      ? colors.success
-                      : (isOnline ? colors.info : colors.textTertiary),
+                  color: tone,
                   shape: BoxShape.circle,
                 ),
               ),
@@ -989,10 +1028,17 @@ class _GatewayListTile extends StatelessWidget {
                             color: colors.textSecondary,
                           ),
                     ),
+                    if (detail != null)
+                      Text(
+                        detail,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: tone,
+                            ),
+                      ),
                   ],
                 ),
               ),
-              if (isConnected)
+              if (presentation.showConnectedBadge)
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1005,14 +1051,14 @@ class _GatewayListTile extends StatelessWidget {
                     style: TextStyle(fontSize: 12, color: colors.success),
                   ),
                 )
-              else if (isConnecting)
+              else if (presentation.showSpinner)
                 const SizedBox(
                   width: 16,
                   height: 16,
                   child: fluent.ProgressRing(strokeWidth: 2),
                 ),
               const SizedBox(width: 8),
-              if (!isConnected && !isConnecting)
+              if (presentation.showConnectButton)
                 TextButton(
                   onPressed: onConnect,
                   child: const Text('连接'),
