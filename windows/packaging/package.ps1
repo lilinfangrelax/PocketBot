@@ -70,11 +70,14 @@ if (-not $iscc) {
 
 $setupBase = "PocketBot-Windows-$Version-Setup"
 $iss = Join-Path $PSScriptRoot "pocketbot.iss"
-# Pass relative paths. Inno's /D preprocessor treats backslash as an escape.
+# ISCC resolves relative /D paths from the .iss file, and its preprocessor
+# treats "\" as an escape. Pass absolute paths with escaped backslashes.
+$stageIss = ((Resolve-Path $stage).Path).Replace('\', '\\')
+$outIss = ((Resolve-Path $RepoRoot).Path).Replace('\', '\\')
 & $iscc `
   "/DAppVersion=$Version" `
-  "/DSourceDir=build-output" `
-  "/DOutputDir=." `
+  "/DSourceDir=$stageIss" `
+  "/DOutputDir=$outIss" `
   "/DSetupBaseName=$setupBase" `
   $iss
 if ($LASTEXITCODE -ne 0) {
