@@ -37,4 +37,15 @@ void main() {
     );
     expect(failed.notice, '检查更新失败');
   });
+
+  test('a request failure includes a redacted proxy error', () {
+    const failed = UpdateCheckOutcome(
+      channel: UpdateChannel.beta,
+      failure: UpdateCheckFailure.request,
+      error: 'HandshakeException: https://user:secret@proxy.local:8080/',
+    );
+    expect(failed.notice, contains('检查更新失败'));
+    expect(failed.notice, contains('***:***@proxy.local:8080'));
+    expect(failed.notice, isNot(contains('secret')));
+  });
 }

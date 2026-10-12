@@ -3,7 +3,7 @@ description: A modern mobile client for Agent Client Protocol (ACP) agents, buil
 
 publish_to: 'none'
 
-version: 1.2.19-beta
+version: 1.2.20-beta
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -57,6 +57,8 @@ dependencies:
 
   # Utilities
   uuid: ^4.2.1
+  # Windows update checks read the system proxy and root store.
+  ffi: ^2.1.0
 
   # Tailscale - using network approach instead of package
 

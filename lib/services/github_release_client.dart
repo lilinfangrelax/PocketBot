@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 import 'package:pocket_bot/config/update_channel.dart';
+import 'package:pocket_bot/services/update_proxy.dart';
+import 'package:pocket_bot/services/update_transport.dart';
 import 'package:pocket_bot/utils/semver.dart';
 
 enum UpdatePlatform { android, windows, other }
@@ -126,11 +128,13 @@ class UpdateCheckOutcome {
     required this.channel,
     this.result,
     this.failure = UpdateCheckFailure.none,
+    this.error,
   });
 
   final UpdateChannel channel;
   final UpdateCheckResult? result;
   final UpdateCheckFailure failure;
+  final String? error;
 
   bool get hasUpdate => result?.updateAvailable == true;
 
@@ -138,7 +142,9 @@ class UpdateCheckOutcome {
   String? get notice {
     switch (failure) {
       case UpdateCheckFailure.request:
-        return '检查更新失败';
+        final detail = formatUpdateError(error);
+        if (detail.isEmpty) return '检查更新失败';
+        return '检查更新失败：$detail';
       case UpdateCheckFailure.emptyChannel:
         if (channel == UpdateChannel.stable) {
           return '正式版通道还没有发布，请把更新通道改成 Beta';
@@ -176,7 +182,7 @@ class GithubReleaseClient {
     this.repo = UpdateConstants.githubRepo,
     required String Function() currentVersion,
     required UpdatePlatform Function() platform,
-  })  : _http = httpClient ?? http.Client(),
+  })  : _http = httpClient ?? createUpdateHttpClient(),
         _currentVersion = currentVersion,
         _platform = platform,
         _ownsHttp = httpClient == null;
@@ -202,7 +208,7 @@ class GithubReleaseClient {
     );
     final response = await _http
         .get(uri, headers: headers)
-        .timeout(const Duration(seconds: 15));
+        .timeout(const Duration(seconds: 30));
 
     if (response.statusCode != 200) {
       throw GithubReleaseException(

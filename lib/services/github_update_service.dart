@@ -9,6 +9,8 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:pocket_bot/config/update_config.dart';
 import 'package:pocket_bot/services/asset_download.dart';
 import 'package:pocket_bot/services/github_release_client.dart';
+import 'package:pocket_bot/services/update_proxy.dart';
+import 'package:pocket_bot/services/update_transport.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/utils/version_utils.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -30,10 +32,12 @@ class GithubUpdateService {
           currentVersion: currentVersion ?? (() => AppVersion.baseVersion),
           platform: platform ?? currentPlatform,
         ),
-        _dio = dio ?? Dio();
+        _dio = dio ?? createUpdateDio(),
+        _ownsDio = dio == null;
 
   final GithubReleaseClient _client;
   final Dio _dio;
+  final bool _ownsDio;
 
   static UpdatePlatform currentPlatform() {
     if (Platform.isAndroid) return UpdatePlatform.android;
@@ -60,10 +64,12 @@ class GithubUpdateService {
       );
       return UpdateCheckOutcome(channel: selected, result: result);
     } catch (e) {
-      Logger.warning('[Update] Check failed: $e');
+      final detail = formatUpdateError(e, maxLength: 500);
+      Logger.warning('[Update] Check failed: $detail');
       return UpdateCheckOutcome(
         channel: selected,
         failure: UpdateCheckFailure.request,
+        error: detail,
       );
     }
   }
@@ -96,14 +102,17 @@ class GithubUpdateService {
       } catch (error) {
         lastError = error;
         Logger.warning(
-          '[Update] Download attempt ${attempt + 1} failed: $error',
+          '[Update] Download attempt ${attempt + 1} failed: '
+          '${formatUpdateError(error, maxLength: 500)}',
         );
         if (attempt < 5) {
           await Future<void>.delayed(Duration(seconds: attempt + 1));
         }
       }
     }
-    Logger.error('[Update] Download failed: $lastError');
+    Logger.error(
+      '[Update] Download failed: ${formatUpdateError(lastError, maxLength: 500)}',
+    );
     return null;
   }
 
@@ -146,8 +155,8 @@ class GithubUpdateService {
         responseType: ResponseType.stream,
         followRedirects: true,
         maxRedirects: 5,
-        connectTimeout: const Duration(seconds: 20),
-        receiveTimeout: const Duration(seconds: 40),
+        connectTimeout: const Duration(seconds: 30),
+        receiveTimeout: const Duration(seconds: 60),
         validateStatus: (code) => code == 200 || code == 206 || code == 416,
       ),
     );
@@ -257,6 +266,9 @@ class GithubUpdateService {
 
   void close() {
     _client.close();
+    if (_ownsDio) {
+      _dio.close(force: true);
+    }
   }
 
   Future<Directory> _updateDirectory() async {

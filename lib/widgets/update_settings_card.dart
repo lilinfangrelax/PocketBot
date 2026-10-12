@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:pocket_bot/config/update_config.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
 import 'package:pocket_bot/services/github_update_service.dart';
+import 'package:pocket_bot/services/update_proxy.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/widgets/fluent_page.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -263,10 +264,11 @@ class UpdateDialogs {
         showAppNotice(context, '已下载，请解压后替换当前安装目录');
       }
     } catch (e) {
-      Logger.error('[Update] Download/install error: $e');
+      final detail = formatUpdateError(e);
+      Logger.error('[Update] Download/install error: $detail');
       if (context.mounted) {
         Navigator.of(context, rootNavigator: true).pop();
-        showAppNotice(context, '出错：$e');
+        showAppNotice(context, detail.isEmpty ? '出错' : '出错：$detail');
       }
     } finally {
       progressNotifier.dispose();
