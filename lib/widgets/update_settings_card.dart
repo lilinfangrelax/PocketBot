@@ -89,14 +89,16 @@ class _UpdateSettingsCardState extends State<UpdateSettingsCard> {
     setState(() => _checking = true);
     final service = GithubUpdateService();
     try {
-      final result = await service.checkForUpdates();
+      final outcome = await service.checkForUpdates();
       if (!context.mounted) return;
-      if (result == null) {
-        _snack(context, '检查更新失败');
+      final notice = outcome.notice;
+      if (notice != null) {
+        _snack(context, notice);
         return;
       }
-      if (!result.updateAvailable) {
-        _snack(context, '已是最新版本');
+      final result = outcome.result;
+      if (result == null) {
+        _snack(context, '检查更新失败');
         return;
       }
       await UpdateDialogs.showAvailable(context, result, service: service);

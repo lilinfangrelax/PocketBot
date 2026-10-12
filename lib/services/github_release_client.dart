@@ -119,6 +119,38 @@ class GithubRelease {
   }
 }
 
+enum UpdateCheckFailure { none, emptyChannel, request }
+
+class UpdateCheckOutcome {
+  const UpdateCheckOutcome({
+    required this.channel,
+    this.result,
+    this.failure = UpdateCheckFailure.none,
+  });
+
+  final UpdateChannel channel;
+  final UpdateCheckResult? result;
+  final UpdateCheckFailure failure;
+
+  bool get hasUpdate => result?.updateAvailable == true;
+
+  /// Short notice for a check that should not open the download dialog.
+  String? get notice {
+    switch (failure) {
+      case UpdateCheckFailure.request:
+        return '检查更新失败';
+      case UpdateCheckFailure.emptyChannel:
+        if (channel == UpdateChannel.stable) {
+          return '正式版通道还没有发布，请把更新通道改成 Beta';
+        }
+        return '这个通道还没有可安装的版本';
+      case UpdateCheckFailure.none:
+        if (result == null || result!.updateAvailable) return null;
+        return '已是最新版本';
+    }
+  }
+}
+
 class UpdateCheckResult {
   final GithubRelease release;
   final String currentVersion;

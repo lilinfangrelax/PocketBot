@@ -41,7 +41,7 @@ class GithubUpdateService {
     return UpdatePlatform.other;
   }
 
-  Future<UpdateCheckResult?> checkForUpdates({
+  Future<UpdateCheckOutcome> checkForUpdates({
     UpdateChannel? channel,
   }) async {
     final selected = channel ?? UpdateConfig.channel;
@@ -49,16 +49,22 @@ class GithubUpdateService {
       final result = await _client.checkForUpdates(channel: selected);
       if (result == null) {
         Logger.info('[Update] No releases for channel ${selected.id}');
-        return null;
+        return UpdateCheckOutcome(
+          channel: selected,
+          failure: UpdateCheckFailure.emptyChannel,
+        );
       }
       Logger.info(
         '[Update] channel=${selected.id} current=${result.currentVersion} '
         'latest=${result.release.version} available=${result.updateAvailable}',
       );
-      return result;
+      return UpdateCheckOutcome(channel: selected, result: result);
     } catch (e) {
       Logger.warning('[Update] Check failed: $e');
-      return null;
+      return UpdateCheckOutcome(
+        channel: selected,
+        failure: UpdateCheckFailure.request,
+      );
     }
   }
 
@@ -159,7 +165,8 @@ class GithubUpdateService {
       throw StateError('Unexpected content range');
     }
 
-    final append = plan.offset > 0 && responseAppendsFromOffset(response.statusCode);
+    final append =
+        plan.offset > 0 && responseAppendsFromOffset(response.statusCode);
     final body = response.data;
     if (body == null) {
       throw StateError('Empty download response');
@@ -203,7 +210,8 @@ class GithubUpdateService {
           return false;
         }
         if (!await _hasZipHeader(file)) {
-          Logger.warning('[Update] Refusing to install a file that is not an APK');
+          Logger.warning(
+              '[Update] Refusing to install a file that is not an APK');
           return false;
         }
         try {
@@ -267,8 +275,8 @@ class GithubUpdateService {
 Future<bool> _hasZipHeader(File file) async {
   if (!await file.exists() || await file.length() < 4) return false;
   final header = await file.openRead(0, 4).fold<List<int>>(
-        <int>[],
-        (previous, chunk) => previous..addAll(chunk),
-      );
+    <int>[],
+    (previous, chunk) => previous..addAll(chunk),
+  );
   return looksLikeZipHeader(header);
 }

@@ -104,7 +104,8 @@ void _scheduleUpdateCheck() {
   Future<void>.delayed(const Duration(seconds: 3), () async {
     final service = GithubUpdateService();
     try {
-      final result = await service.checkForUpdates();
+      final outcome = await service.checkForUpdates();
+      final result = outcome.result;
       if (result == null || !result.updateAvailable) return;
       final context = appNavigatorKey.currentContext;
       if (context == null || !context.mounted) return;

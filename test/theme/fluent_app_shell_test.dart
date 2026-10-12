@@ -1,6 +1,7 @@
 import 'package:fluent_ui/fluent_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
+import 'package:pocket_bot/theme/pocket_fonts.dart';
 import 'package:pocket_bot/widgets/fluent_page.dart';
 import 'package:pocket_bot/widgets/fluent_tab_bar.dart';
 
@@ -13,6 +14,11 @@ void main() {
     expect(dark.brightness, Brightness.dark);
     expect(light.accentColor.normal, const Color(0xFF007C67));
     expect(dark.accentColor, Colors.teal);
+    expect(light.typography.body?.fontFamily, PocketFonts.ui);
+    expect(dark.typography.body?.fontFamilyFallback, PocketFonts.uiFallback);
+    expect(
+        buildMaterialTheme(Brightness.light).textTheme.bodyMedium?.fontFamily,
+        PocketFonts.ui);
   });
 
   testWidgets('FluentScreen uses ScaffoldPage with a compact header',
