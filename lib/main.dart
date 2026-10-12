@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pocket_bot/config/update_config.dart';
 import 'package:pocket_bot/screens/main_screen.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
+import 'package:pocket_bot/services/desktop_database.dart';
 import 'package:pocket_bot/services/contact_agent_linker.dart';
 import 'package:pocket_bot/services/group_chat_service.dart';
 import 'package:pocket_bot/services/github_update_service.dart';
@@ -40,6 +41,7 @@ final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  configureDesktopDatabase();
   _installErrorHandlers();
 
   await DebugLog.instance.init();
@@ -88,9 +90,14 @@ void _installErrorHandlers() {
 }
 
 Future<void> _initNotifications() async {
-  final notificationService = NotificationService();
-  await notificationService.initialize();
-  await notificationService.requestPermissions();
+  try {
+    final notificationService = NotificationService();
+    await notificationService.initialize();
+    await notificationService.requestPermissions();
+  } catch (error) {
+    // Desktop builds do not ship the Android/iOS notification plugin.
+    Logger.warning('[Main] Notifications unavailable: $error');
+  }
 }
 
 void _scheduleUpdateCheck() {

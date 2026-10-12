@@ -3,7 +3,7 @@ description: A modern mobile client for Agent Client Protocol (ACP) agents, buil
 
 publish_to: 'none'
 
-version: 1.2.17-beta
+version: 1.2.18-beta
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -49,6 +49,10 @@ dependencies:
 
   # Database
   sqflite: ^2.3.0
+  # Windows and Linux have no sqflite plugin. The FFI build stores contacts
+  # and group chats on those desktops.
+  sqflite_common_ffi: ^2.3.4
+  sqlite3_flutter_libs: ^0.5.28
   path: ^1.8.3
 
   # Utilities
