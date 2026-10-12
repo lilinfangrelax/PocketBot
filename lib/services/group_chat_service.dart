@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:pocket_bot/models/group_chat.dart';
 import 'package:pocket_bot/models/ai_contact_config.dart';
+import 'package:pocket_bot/models/group_workspace.dart';
 import 'package:pocket_bot/services/database_service.dart';
 import 'package:pocket_bot/services/contact_agent_linker.dart';
+import 'package:pocket_bot/services/group_workspace_store.dart';
 import 'package:pocket_bot/utils/logger.dart';
 
 /// 群聊服务 - 处理@提及解析和AI触发逻辑
@@ -14,6 +16,16 @@ class GroupChatService {
   final DatabaseService _db = DatabaseService();
   /// Set at startup; resolves AI members to their agent connections.
   ContactAgentLinker? linker;
+  final GroupWorkspaceStore workspaces = GroupWorkspaceStore();
+
+  Future<GroupWorkspace?> workspaceFor(String groupId) async {
+    try {
+      return await workspaces.get(groupId);
+    } catch (error) {
+      Logger.warning('[GroupChat] Could not read workspace for $groupId: $error');
+      return null;
+    }
+  }
 
   /// 从文本中解析@提及
   /// 返回匹配到的 AtInfo 列表
@@ -95,17 +107,19 @@ class GroupChatService {
       configs: configs,
       mentions: parseAtMentionsSync(message.content),
     );
+    final workspace = targets.isEmpty ? null : await workspaceFor(group.id);
 
     final replies = await Future.wait(targets.map((member) async {
       final config = configs[member.userId]!;
       onStatus?.call(member.userName, null);
       try {
-        final service = await linker.serviceFor(config);
+        final service = await linker.serviceFor(config, workspace: workspace);
         final sessionKey = await linker.sessionFor(
           service: service,
           contactId: member.userId,
           groupId: group.id,
           title: '${group.name} · ${member.userName}',
+          cwd: ContactAgentLinker.directoryFor(config, workspace),
         );
         final text = await service.sendMessageAndWait(
           groupPrompt(group, message),

@@ -145,4 +145,48 @@ void main() {
     expect(
         uploadedTo, r'C:\Users\me\.pocketbot\pocketbot-remote-1.2.5-beta.exe');
   });
+
+  test('Windows scripts survive a broken helper and stay quiet', () {
+    final probe = powershellScript(helperProbeCommand(windows, '1.2.15-beta'));
+    expect(probe, contains(r"$ProgressPreference = 'SilentlyContinue'"));
+    expect(probe, contains('try {'));
+    expect(probe, contains("Write-Output 'MISSING'"));
+
+    final download = powershellScript(helperRemoteDownloadCommand(
+      platform: windows,
+      version: '1.2.15-beta',
+      url: 'https://example.com/helper.exe',
+    ));
+    expect(download, contains(r"$ProgressPreference = 'SilentlyContinue'"));
+    expect(download, contains(r"-OutFile $t"));
+    expect(download, contains(r'Move-Item -Force -LiteralPath $t'));
+  });
+
+  group('cleanRemoteStderr', () {
+    test('keeps the error text from PowerShell CLIXML', () {
+      const stderr = '#< CLIXML\r\n'
+          '<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">'
+          '<Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T></TN></Obj>'
+          '<S S="Error">Program &apos;pocketbot-remote.exe&apos; failed to run_x000D__x000A_</S>'
+          '<S S="Error">The file is not a valid Win32 application_x000D__x000A_</S>'
+          '</Objs>';
+      expect(
+        cleanRemoteStderr(stderr),
+        "Program 'pocketbot-remote.exe' failed to run\r\n"
+        'The file is not a valid Win32 application',
+      );
+    });
+
+    test('drops progress-only CLIXML', () {
+      expect(
+        cleanRemoteStderr('#< CLIXML\n<Objs Version="1.1.0.1"><Obj S="progress"/></Objs>'),
+        '',
+      );
+      expect(cleanRemoteStderr('#< CLIXML\n<Objs Version="1.1.0.1"><Obj S="progre'), '');
+    });
+
+    test('leaves ordinary stderr alone', () {
+      expect(cleanRemoteStderr('bash: agent: not found'), 'bash: agent: not found');
+    });
+  });
 }

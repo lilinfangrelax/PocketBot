@@ -28,7 +28,13 @@ flutter run
 On the home screen:
 
 - **This computer**: choose a working directory and start the local agent
-- **SSH**: enter host, user, and password or private key, then pick a remote folder
+- **SSH**: enter host, user, and password or private key, then **Save and log in**. A host is online when its SSH login succeeds. Picking a folder and starting an agent is a separate step.
+
+Hosts, folders, and agents are independent:
+
+- One SSH login per host, shared by folder browsing and every agent on it
+- Each AI contact runs its own agent process per host
+- Each group chat can have a working folder (host + path). Every AI member answers there in its own ACP session (`session/new` with that `cwd`); changing the folder starts fresh sessions
 
 Credentials are stored on-device with Flutter Secure Storage. They are never sent in git.
 
@@ -40,6 +46,16 @@ flutter test
 ```
 
 See [ACP testing](docs/ACP_TESTING.md) for the expected JSON-RPC flow.
+
+### Debug logs
+
+Settings → 调试 → 调试模式 turns on verbose logging: SSH logins, remote
+commands, agent launches and every ACP JSON-RPC frame (streaming chunks are
+skipped). Info, warnings, errors and uncaught exceptions are always recorded.
+Logs are kept in memory (last 2000 entries) and in
+`<app support>/logs/pocketbot.log` (rotated at 1 MB). Open 查看日志 to search,
+filter, copy or export them. Passwords, tokens, private keys and MCP env/header
+values are masked before anything is stored.
 
 ## Security
 

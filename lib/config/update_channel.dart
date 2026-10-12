@@ -1,3 +1,5 @@
+import 'package:pocket_bot/utils/semver.dart';
+
 /// GitHub Releases source and update channels. Kept Flutter-free for unit tests.
 class UpdateConstants {
   static const githubOwner = 'lilinfangrelax';
@@ -28,4 +30,20 @@ enum UpdateChannel {
     }
     return UpdateChannel.stable;
   }
+}
+
+/// Saved choice wins. A beta build that has never chosen a channel follows
+/// Beta, because stable releases are not published during the beta.
+UpdateChannel resolveUpdateChannel({
+  String? savedId,
+  String? currentVersion,
+}) {
+  if (savedId != null && savedId.isNotEmpty) {
+    for (final channel in UpdateChannel.values) {
+      if (channel.id == savedId) return channel;
+    }
+  }
+  final version = SemVer.tryParse(currentVersion);
+  if (version != null && version.isPreRelease) return UpdateChannel.beta;
+  return UpdateChannel.stable;
 }

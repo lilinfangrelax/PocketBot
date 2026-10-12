@@ -179,9 +179,10 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
     } else if (profile == null) {
       where = '绑定的连接已被删除';
     } else {
-      final dir = profile.workingDirectory.isEmpty
+      final cwd = profile.workingDirectory.trim();
+      final dir = cwd.isEmpty
           ? ''
-          : ' · ${profile.workingDirectory}';
+          : (cwd == '.' ? ' · 主目录' : ' · $cwd');
       where = '${profile.name}$dir';
     }
     final agent = config == null

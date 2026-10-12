@@ -4,6 +4,10 @@ class ContactSessionMapping {
   final String contactId; // AI 联系人 ID
   final String groupId; // 群聊 ID
   final String sessionKey; // Corresponding ACP sessionId
+
+  /// Folder the session was opened in. Empty for mappings saved before
+  /// sessions had their own folder.
+  final String workingDirectory;
   final DateTime createdAt;
   final DateTime lastActiveAt;
   final int messageCount; // 累计消息数
@@ -13,6 +17,7 @@ class ContactSessionMapping {
     required this.contactId,
     required this.groupId,
     required this.sessionKey,
+    this.workingDirectory = '',
     DateTime? createdAt,
     DateTime? lastActiveAt,
     this.messageCount = 0,
@@ -25,6 +30,7 @@ class ContactSessionMapping {
       contactId: json['contactId'] ?? '',
       groupId: json['groupId'] ?? '',
       sessionKey: json['sessionKey'] ?? '',
+      workingDirectory: json['workingDirectory'] ?? '',
       createdAt: json['createdAt'] != null
           ? DateTime.parse(json['createdAt'])
           : DateTime.now(),
@@ -41,6 +47,7 @@ class ContactSessionMapping {
       'contactId': contactId,
       'groupId': groupId,
       'sessionKey': sessionKey,
+      'workingDirectory': workingDirectory,
       'createdAt': createdAt.toIso8601String(),
       'lastActiveAt': lastActiveAt.toIso8601String(),
       'messageCount': messageCount,
@@ -54,6 +61,7 @@ class ContactSessionMapping {
       'contact_id': contactId,
       'group_id': groupId,
       'session_key': sessionKey,
+      'working_directory': workingDirectory,
       'created_at': createdAt.toIso8601String(),
       'last_active_at': lastActiveAt.toIso8601String(),
       'message_count': messageCount,
@@ -67,6 +75,7 @@ class ContactSessionMapping {
       contactId: map['contact_id'] ?? '',
       groupId: map['group_id'] ?? '',
       sessionKey: map['session_key'] ?? '',
+      workingDirectory: map['working_directory'] ?? '',
       createdAt: map['created_at'] != null
           ? DateTime.parse(map['created_at'])
           : DateTime.now(),
@@ -82,6 +91,7 @@ class ContactSessionMapping {
     String? contactId,
     String? groupId,
     String? sessionKey,
+    String? workingDirectory,
     DateTime? createdAt,
     DateTime? lastActiveAt,
     int? messageCount,
@@ -91,6 +101,7 @@ class ContactSessionMapping {
       contactId: contactId ?? this.contactId,
       groupId: groupId ?? this.groupId,
       sessionKey: sessionKey ?? this.sessionKey,
+      workingDirectory: workingDirectory ?? this.workingDirectory,
       createdAt: createdAt ?? this.createdAt,
       lastActiveAt: lastActiveAt ?? this.lastActiveAt,
       messageCount: messageCount ?? this.messageCount,

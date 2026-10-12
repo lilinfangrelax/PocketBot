@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:ui' show PlatformDispatcher;
 import 'package:fluent_ui/fluent_ui.dart';
 import 'package:flutter/material.dart' as material;
 import 'package:provider/provider.dart';
@@ -6,12 +8,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pocket_bot/config/update_config.dart';
 import 'package:pocket_bot/screens/main_screen.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
+import 'package:pocket_bot/services/desktop_database.dart';
 import 'package:pocket_bot/services/contact_agent_linker.dart';
 import 'package:pocket_bot/services/group_chat_service.dart';
 import 'package:pocket_bot/services/github_update_service.dart';
 import 'package:pocket_bot/services/notification_service.dart';
 import 'package:pocket_bot/services/ssh_host_keys.dart';
 import 'package:pocket_bot/services/websocket_service.dart';
+import 'package:pocket_bot/utils/debug_log.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/utils/version_utils.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
@@ -37,8 +41,13 @@ final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  configureDesktopDatabase();
+  _installErrorHandlers();
 
+  await DebugLog.instance.init();
   await AppVersion.init();
+  Logger.info('[App] PocketBot ${AppVersion.fullVersion} started on '
+      '${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
   await UpdateConfig.load();
   SshHostKeys.prompt = hostKeyPromptFor(appNavigatorKey);
 
@@ -65,17 +74,38 @@ Future<void> main() async {
   );
 }
 
+void _installErrorHandlers() {
+  FlutterError.onError = (details) {
+    Logger.error(
+      '[Flutter] ${details.exceptionAsString()}',
+      details.context?.toDescription(),
+      details.stack,
+    );
+    FlutterError.presentError(details);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    Logger.error('[Uncaught]', error, stack);
+    return true;
+  };
+}
+
 Future<void> _initNotifications() async {
-  final notificationService = NotificationService();
-  await notificationService.initialize();
-  await notificationService.requestPermissions();
+  try {
+    final notificationService = NotificationService();
+    await notificationService.initialize();
+    await notificationService.requestPermissions();
+  } catch (error) {
+    // Desktop builds do not ship the Android/iOS notification plugin.
+    Logger.warning('[Main] Notifications unavailable: $error');
+  }
 }
 
 void _scheduleUpdateCheck() {
   Future<void>.delayed(const Duration(seconds: 3), () async {
     final service = GithubUpdateService();
     try {
-      final result = await service.checkForUpdates();
+      final outcome = await service.checkForUpdates();
+      final result = outcome.result;
       if (result == null || !result.updateAvailable) return;
       final context = appNavigatorKey.currentContext;
       if (context == null || !context.mounted) return;
