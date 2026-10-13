@@ -5,6 +5,7 @@ import 'package:pocketbot_remote/pocketbot_remote.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:pocket_bot/models/message.dart';
+import 'package:pocket_bot/services/custom_acp.dart';
 
 const acpRegistryUrl =
     'https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json';
@@ -230,8 +231,18 @@ Future<GatewayInfo> prepareGatewayLaunch(
   GatewayInfo gateway,
   RemotePlatform platform, {
   Future<List<AcpRegistryAgent>> Function()? loadAgents,
+  Future<CustomAcpAgent?> Function(String id)? loadCustom,
 }) async {
   if (gateway.agentId.isEmpty) return gateway;
+  if (isCustomAcpId(gateway.agentId)) {
+    final custom = await (loadCustom ?? CustomAcpStore.find)(gateway.agentId);
+    if (custom == null) {
+      final label =
+          gateway.agentLabel.isEmpty ? gateway.agentId : gateway.agentLabel;
+      throw Exception('CUSTOM_AGENT_MISSING:没有找到自定义 ACP $label');
+    }
+    return applyCustomAcpAgent(gateway, custom);
+  }
   List<AcpRegistryAgent> agents;
   try {
     agents = await (loadAgents ?? AcpRegistryCatalog.load)();

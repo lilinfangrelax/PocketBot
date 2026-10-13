@@ -36,14 +36,32 @@ class CursorAgent {
     return trimmed;
   }
 
+  /// Cursor's private install dir is only a fallback for the `agent` command.
+  @visibleForTesting
+  static bool usesCursorInstallFallback(String command) {
+    final name = _basename(command.trim()).toLowerCase();
+    return name.isEmpty ||
+        name == 'agent' ||
+        name == 'agent.cmd' ||
+        name == 'agent.ps1' ||
+        name == 'cursor-agent' ||
+        name == 'cursor-agent.cmd' ||
+        name == 'cursor-agent.ps1';
+  }
+
   static Future<ResolvedAgent> resolve([String command = defaultCommand]) async {
-    if (_looksLikePath(command)) {
-      return _fromPath(command);
+    final requested = command.trim().isEmpty ? defaultCommand : command.trim();
+    if (_looksLikePath(requested)) {
+      return _fromPath(requested);
     }
 
-    final fromPath = await _which(command);
-    if (fromPath != null) {
-      return _fromPath(fromPath);
+    final fromPath = await _which(requested);
+    if (fromPath != null) return _fromPath(fromPath);
+
+    if (!usesCursorInstallFallback(requested)) {
+      throw Exception(
+        'AGENT_NOT_FOUND:找不到命令 $requested。请确认它已安装，并且在启动代理的那台电脑的 PATH 里。',
+      );
     }
 
     final localAppData = Platform.environment['LOCALAPPDATA'];
@@ -136,16 +154,18 @@ class CursorAgent {
   }
 
   static ResolvedAgent _fromPath(String path) {
-    final file = File(path);
-    final installDir = file.parent.path;
-    final unwrapped = resolveFromInstallDir(installDir);
-    if (unwrapped != null) return unwrapped;
+    if (usesCursorInstallFallback(path)) {
+      final file = File(path);
+      final installDir = file.parent.path;
+      final unwrapped = resolveFromInstallDir(installDir);
+      if (unwrapped != null) return unwrapped;
 
-    final inVersionDir = resolveFromInstallDir(file.parent.parent.path);
-    if (inVersionDir != null && _basename(file.parent.path) != 'cursor-agent') {
-      final siblingNode = File('$installDir${Platform.pathSeparator}node.exe');
-      if (siblingNode.existsSync()) {
-        return resolveFromInstallDir(installDir) ?? inVersionDir;
+      final inVersionDir = resolveFromInstallDir(file.parent.parent.path);
+      if (inVersionDir != null && _basename(file.parent.path) != 'cursor-agent') {
+        final siblingNode = File('$installDir${Platform.pathSeparator}node.exe');
+        if (siblingNode.existsSync()) {
+          return resolveFromInstallDir(installDir) ?? inVersionDir;
+        }
       }
     }
 

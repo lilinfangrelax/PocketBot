@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/services/acp_registry.dart';
+import 'package:pocket_bot/services/custom_acp.dart';
 import 'package:pocketbot_remote/pocketbot_remote.dart';
 
 void main() {
@@ -160,6 +161,36 @@ void main() {
     expect(restored.agentId, 'kilo');
     expect(restored.archiveUrl, isNull);
     expect(restored.resumeAgent, isFalse);
+  });
+
+  test('prepareGatewayLaunch uses a saved custom command and skips the registry', () async {
+    const platform = RemotePlatform(os: 'linux', arch: 'x86_64');
+    const custom = CustomAcpAgent(
+      id: 'custom:teshi',
+      name: 'Teshi',
+      command: 'teshi',
+      args: ['acp'],
+    );
+    final prepared = await prepareGatewayLaunch(
+      GatewayInfo.local(agentId: custom.id, agentLabel: '旧名称', command: 'agent'),
+      platform,
+      loadAgents: () async => throw StateError('registry should not load'),
+      loadCustom: (id) async => id == custom.id ? custom : null,
+    );
+    expect(prepared.command, 'teshi');
+    expect(prepared.args, ['acp']);
+    expect(prepared.agentLabel, 'Teshi');
+    expect(prepared.archiveUrl, isNull);
+
+    await expectLater(
+      prepareGatewayLaunch(
+        GatewayInfo.ssh(host: '10.0.0.8', username: 'me', agentId: 'custom:missing'),
+        platform,
+        loadAgents: () async => throw StateError('registry should not load'),
+        loadCustom: (_) async => null,
+      ),
+      throwsA(predicate((error) => '$error'.contains('CUSTOM_AGENT_MISSING'))),
+    );
   });
 
   test('prepareGatewayLaunch reports a missing or unsupported agent', () async {
