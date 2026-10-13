@@ -4,6 +4,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
 
 void main() {
+  test('only the Cursor agent command falls back to the local install', () {
+    expect(CursorAgent.usesCursorInstallFallback('agent'), isTrue);
+    expect(CursorAgent.usesCursorInstallFallback(r'C:\cursor-agent\agent.cmd'), isTrue);
+    expect(CursorAgent.usesCursorInstallFallback('teshi'), isFalse);
+    expect(CursorAgent.usesCursorInstallFallback(r'C:\Tools\teshi.exe'), isFalse);
+  });
+
   test('picks the newest Cursor agent version directory', () {
     expect(CursorAgent.versionSortKey('2026.8.25-3e8eec8'), 20260825);
     expect(CursorAgent.versionSortKey('2026.07.09-a3815c0'), 20260709);

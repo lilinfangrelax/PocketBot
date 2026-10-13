@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/screens/acp_registry_screen.dart';
-import 'package:pocket_bot/services/acp_registry.dart';
+import 'package:pocket_bot/services/custom_acp.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
 
 /// Which agent an AI contact talks to: a saved connection, a folder on that
-/// machine, and an ACP registry agent.
+/// machine, and an ACP registry or custom agent.
 class AgentBinding {
   final String gatewayId;
   final String workingDirectory;
@@ -88,7 +88,7 @@ class _AgentBindingEditorState extends State<AgentBindingEditor> {
   }
 
   Future<void> _pickAgent() async {
-    final picked = await Navigator.push<AcpRegistryAgent>(
+    final picked = await Navigator.push<AcpAgentChoice>(
       context,
       MaterialPageRoute(
         builder: (_) => AcpRegistryScreen(selectedId: _agentId),

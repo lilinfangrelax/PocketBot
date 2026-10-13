@@ -10,7 +10,7 @@ import 'package:pocket_bot/screens/acp_registry_screen.dart';
 import 'package:pocket_bot/screens/chat_screen.dart';
 import 'package:pocket_bot/screens/remote_directory_picker.dart';
 import 'package:pocket_bot/screens/settings_screen.dart';
-import 'package:pocket_bot/services/acp_registry.dart';
+import 'package:pocket_bot/services/custom_acp.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
 import 'package:pocket_bot/services/ssh_host_keys.dart';
@@ -79,7 +79,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _pickAgent() async {
-    final picked = await Navigator.push<AcpRegistryAgent>(
+    final picked = await Navigator.push<AcpAgentChoice>(
       context,
       MaterialPageRoute(
         builder: (_) => AcpRegistryScreen(selectedId: _agentId),
@@ -106,7 +106,7 @@ class _HomeScreenState extends State<HomeScreen> {
       child: ListTile(
         leading: const Icon(Icons.smart_toy_outlined),
         title: Text(_agentLabel),
-        subtitle: const Text('ACP Registry，点按更换代理'),
+        subtitle: const Text('ACP Registry 或自定义命令，点按更换'),
         trailing: const Icon(Icons.chevron_right),
         onTap: _pickAgent,
       ),
@@ -404,6 +404,10 @@ class _HomeScreenState extends State<HomeScreen> {
           return errorMessage.isEmpty ? 'Registry 里没有这个代理' : errorMessage;
         case 'AGENT_UNSUPPORTED_PLATFORM':
           return errorMessage.isEmpty ? '这个代理不支持当前系统' : errorMessage;
+        case 'CUSTOM_AGENT_MISSING':
+          return errorMessage.isEmpty ? '没有找到这个自定义 ACP' : errorMessage;
+        case 'AGENT_NOT_FOUND':
+          return errorMessage.isEmpty ? '找不到这个命令' : errorMessage;
         case 'CONNECTION_FAILED':
           return errorMessage.isEmpty ? '连接失败' : errorMessage;
         case 'HOST_KEY_REJECTED':
