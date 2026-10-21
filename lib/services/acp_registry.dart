@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:pocketbot_remote/pocketbot_remote.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -232,6 +234,36 @@ Future<GatewayInfo> prepareGatewayLaunch(
   Future<List<AcpRegistryAgent>> Function()? loadAgents,
 }) async {
   if (gateway.agentId.isEmpty) return gateway;
+  if (kDebugMode && gateway.agentId == 'pocketbot-mock') {
+    final command = Platform.environment['POCKETBOT_E2E_MOCK_AGENT'];
+    if (command == null || command.isEmpty) {
+      throw Exception(
+        'MOCK_AGENT_MISSING:POCKETBOT_E2E_MOCK_AGENT 未设置，无法启动测试代理',
+      );
+    }
+    final rawArgs = Platform.environment['POCKETBOT_E2E_MOCK_AGENT_ARGS'];
+    var args = const <String>[];
+    if (rawArgs != null && rawArgs.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawArgs);
+        if (decoded is List) {
+          args = decoded.map((item) => '$item').toList();
+        }
+      } on FormatException catch (error) {
+        throw Exception(
+          'MOCK_AGENT_ARGS_INVALID:POCKETBOT_E2E_MOCK_AGENT_ARGS 不是合法 JSON: $error',
+        );
+      }
+    }
+    return gateway.copyWith(
+      command: command,
+      args: args,
+      agentLabel:
+          gateway.agentLabel.isEmpty ? 'Mock Agent' : gateway.agentLabel,
+      agentVersion: 'e2e',
+      legacyArgv: const [],
+    );
+  }
   List<AcpRegistryAgent> agents;
   try {
     agents = await (loadAgents ?? AcpRegistryCatalog.load)();

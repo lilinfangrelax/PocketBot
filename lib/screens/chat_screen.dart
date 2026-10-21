@@ -1189,6 +1189,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 _NewLineIntent: _NewLineAction(_controller),
                               },
                               child: TextField(
+                                key: const ValueKey('chat-input'),
                                 controller: _controller,
                                 decoration: InputDecoration(
                                   hintText: wsService.availableCommands.isEmpty

@@ -76,6 +76,7 @@ class _FluentTabButton extends StatelessWidget {
       button: true,
       selected: selected,
       label: tab.label,
+      onTap: onPressed,
       excludeSemantics: true,
       child: HoverButton(
         onPressed: onPressed,

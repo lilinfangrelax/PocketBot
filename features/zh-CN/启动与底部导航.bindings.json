@@ -1,0 +1,202 @@
+{
+  "format_version": 2,
+  "feature": "features/zh-CN/启动与底部导航.feature",
+  "steps": [
+    {
+      "step_line": 8,
+      "step_keyword": "假如",
+      "step_text": "PocketBot 主窗口已打开",
+      "step_text_normalized": "pocketbot 主窗口已打开",
+      "source": "binding",
+      "status": "confirmed",
+      "primary": {
+        "strategy": "uia",
+        "value": "uia:control_type=WindowControl;name=PocketBot",
+        "action": "assert_visible"
+      },
+      "confirmed_at": "2026-10-21T13:51:43.856594400+00:00"
+    },
+    {
+      "step_line": 9,
+      "step_keyword": "当",
+      "step_text": "应用完成启动",
+      "step_text_normalized": "应用完成启动",
+      "source": "binding",
+      "status": "confirmed",
+      "primary": {
+        "strategy": "uia",
+        "value": "uia:control_type=TextControl;name=消息",
+        "action": "assert_visible"
+      },
+      "confirmed_at": "2026-10-21T15:19:03.897421+00:00"
+    },
+    {
+      "step_line": 10,
+      "step_keyword": "那么",
+      "step_text": "可见页面标题「消息」",
+      "step_text_normalized": "可见页面标题「消息」",
+      "source": "binding",
+      "status": "confirmed",
+      "primary": {
+        "strategy": "uia",
+        "value": "uia:control_type=TextControl;name=消息",
+        "action": "assert_visible"
+      },
+      "confirmed_at": "2026-10-21T13:51:48.367171600+00:00"
+    },
+    {
+      "step_line": 11,
+      "step_keyword": "并且",
+      "step_text": "可见底部标签「消息」",
+      "step_text_normalized": "可见底部标签「消息」",
+      "source": "binding",
+      "status": "confirmed",
+      "primary": {
+        "strategy": "uia",
+        "value": "uia:control_type=ButtonControl;name=消息",
+        "action": "assert_visible"
+      },
+      "confirmed_at": "2026-10-21T13:51:48.891950400+00:00"
+    },
+    {
+      "step_line": 12,
+      "step_keyword": "并且",
+      "step_text": "可见底部标签「通讯录」",
+      "step_text_normalized": "可见底部标签「通讯录」",
+      "source": "binding",
+      "status": "confirmed",
+      "primary": {
+        "strategy": "uia",
+        "value": "uia:control_type=ButtonControl;name=通讯录",
+        "action": "assert_visible"
+      },
+      "confirmed_at": "2026-10-21T13:51:49.401601800+00:00"
+    },
+    {
+      "step_line": 13,
+      "step_keyword": "并且",
+      "step_text": "可见底部标签「发现」",
+      "step_text_normalized": "可见底部标签「发现」",
+      "source": "binding",
+      "status": "confirmed",
+      "primary": {
+        "strategy": "uia",
+        "value": "uia:control_type=ButtonControl;name=发现",
+        "action": "assert_visible"
+      },
+      "confirmed_at": "2026-10-21T13:53:38.079464500+00:00"
+    },
+    {
+      "step_line": 14,
+      "step_keyword": "并且",
+      "step_text": "可见底部标签「我」",
+      "step_text_normalized": "可见底部标签「我」",
+      "source": "binding",
+      "status": "confirmed",
+      "primary": {
+        "strategy": "uia",
+        "value": "uia:control_type=ButtonControl;name=我",
+        "action": "assert_visible"
+      },
+      "confirmed_at": "2026-10-21T13:53:38.642220400+00:00"
+    },
+    {
+      "step_line": 17,
+      "step_keyword": "当",
+      "step_text": "点按底部标签「消息」",
+      "step_text_normalized": "点按底部标签「消息」",
+      "source": "binding",
+      "status": "confirmed",
+      "primary": {
+        "strategy": "uia",
+        "value": "uia:control_type=ButtonControl;name=消息",
+        "action": "click"
+      },
+      "confirmed_at": "2026-10-21T13:54:39.850133+00:00"
+    },
+    {
+      "step_line": 20,
+      "step_keyword": "当",
+      "step_text": "点按底部标签「通讯录」",
+      "step_text_normalized": "点按底部标签「通讯录」",
+      "source": "binding",
+      "status": "confirmed",
+      "primary": {
+        "strategy": "uia",
+        "value": "uia:control_type=ButtonControl;name=通讯录",
+        "action": "click"
+      },
+      "confirmed_at": "2026-10-21T13:53:49.114255600+00:00"
+    },
+    {
+      "step_line": 21,
+      "step_keyword": "那么",
+      "step_text": "可见页面标题「通讯录」",
+      "step_text_normalized": "可见页面标题「通讯录」",
+      "source": "binding",
+      "status": "confirmed",
+      "primary": {
+        "strategy": "uia",
+        "value": "uia:control_type=TextControl;name=通讯录",
+        "action": "assert_visible"
+      },
+      "confirmed_at": "2026-10-21T13:53:49.789524500+00:00"
+    },
+    {
+      "step_line": 27,
+      "step_keyword": "当",
+      "step_text": "点按底部标签「发现」",
+      "step_text_normalized": "点按底部标签「发现」",
+      "source": "binding",
+      "status": "confirmed",
+      "primary": {
+        "strategy": "uia",
+        "value": "uia:control_type=ButtonControl;name=发现",
+        "action": "click"
+      },
+      "confirmed_at": "2026-10-21T13:54:00.492612700+00:00"
+    },
+    {
+      "step_line": 28,
+      "step_keyword": "那么",
+      "step_text": "可见页面标题「PocketBot」",
+      "step_text_normalized": "可见页面标题「pocketbot」",
+      "source": "binding",
+      "status": "confirmed",
+      "primary": {
+        "strategy": "uia",
+        "value": "uia:control_type=TextControl;name=PocketBot",
+        "action": "assert_visible"
+      },
+      "confirmed_at": "2026-10-21T13:54:00.947196700+00:00"
+    },
+    {
+      "step_line": 34,
+      "step_keyword": "当",
+      "step_text": "点按底部标签「我」",
+      "step_text_normalized": "点按底部标签「我」",
+      "source": "binding",
+      "status": "confirmed",
+      "primary": {
+        "strategy": "uia",
+        "value": "uia:control_type=ButtonControl;name=我",
+        "action": "click"
+      },
+      "confirmed_at": "2026-10-21T13:54:10.661072600+00:00"
+    },
+    {
+      "step_line": 35,
+      "step_keyword": "那么",
+      "step_text": "可见页面标题「设置」",
+      "step_text_normalized": "可见页面标题「设置」",
+      "source": "binding",
+      "status": "confirmed",
+      "primary": {
+        "strategy": "uia",
+        "value": "uia:control_type=TextControl;name=设置",
+        "action": "assert_visible"
+      },
+      "confirmed_at": "2026-10-21T13:54:10.964931900+00:00"
+    }
+  ]
+}

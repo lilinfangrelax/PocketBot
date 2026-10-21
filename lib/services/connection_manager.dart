@@ -144,7 +144,8 @@ class ConnectionManager extends ChangeNotifier {
     return _pool[profileKey(profile)];
   }
 
-  List<ws.WebSocketService> get pooledServices => List.unmodifiable(_pool.values);
+  List<ws.WebSocketService> get pooledServices =>
+      List.unmodifiable(_pool.values);
 
   /// Returns a connected service for [profile], reusing the primary
   /// connection or an open pooled one, and connecting otherwise.
@@ -155,8 +156,12 @@ class ConnectionManager extends ChangeNotifier {
     if (existing != null && existing.isConnected) {
       return Future.value(existing);
     }
-    return _opening[key] ??= _openPooled(key, profile, existing)
-        .whenComplete(() => _opening.remove(key));
+    // Block body: returning the removed future would make whenComplete await
+    // this very future and never resolve.
+    return _opening[key] ??=
+        _openPooled(key, profile, existing).whenComplete(() {
+      _opening.remove(key);
+    });
   }
 
   Future<ws.WebSocketService> _openPooled(
@@ -316,7 +321,8 @@ class ConnectionManager extends ChangeNotifier {
 
   Future<void> connectTo(GatewayInfo gateway) async {
     var prepared = gateway;
-    if (gateway.kind == AgentTransportKind.local && gateway.agentId.isNotEmpty) {
+    if (gateway.kind == AgentTransportKind.local &&
+        gateway.agentId.isNotEmpty) {
       try {
         prepared = await prepareGatewayLaunch(gateway, localRemotePlatform());
       } catch (error) {

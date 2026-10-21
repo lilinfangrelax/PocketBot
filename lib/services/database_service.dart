@@ -1,5 +1,8 @@
 import 'dart:convert';
-import 'package:sqflite/sqflite.dart';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart';
 import 'package:pocket_bot/models/group_chat.dart';
 import 'package:pocket_bot/models/contact.dart';
@@ -84,7 +87,8 @@ class DatabaseService {
   }
 
   /// 执行原始 SQL 查询
-  Future<List<Map<String, dynamic>>> rawQuery(String sql, [List<Object?>? arguments]) async {
+  Future<List<Map<String, dynamic>>> rawQuery(String sql,
+      [List<Object?>? arguments]) async {
     final db = await database;
     return await db.rawQuery(sql, arguments);
   }
@@ -105,8 +109,24 @@ class DatabaseService {
 
   /// 初始化数据库
   Future<Database> _initDatabase() async {
-    final databasesPath = await getDatabasesPath();
-    final path = join(databasesPath, 'pocket_bot.db');
+    final overrideDir =
+        kDebugMode ? Platform.environment['POCKETBOT_E2E_DB_DIR'] : null;
+    final isDesktop = Platform.isWindows || Platform.isLinux;
+    if (isDesktop) {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+    }
+
+    String path;
+    if (overrideDir != null && overrideDir.isNotEmpty) {
+      await Directory(overrideDir).create(recursive: true);
+      path = join(overrideDir, 'pocket_bot.db');
+    } else if (isDesktop) {
+      final supportDir = await getApplicationSupportDirectory();
+      path = join(supportDir.path, 'pocket_bot.db');
+    } else {
+      path = join(await getDatabasesPath(), 'pocket_bot.db');
+    }
 
     return await openDatabase(
       path,
@@ -192,7 +212,8 @@ class DatabaseService {
     // 从版本1升级到版本2：添加 show_in_session_list 字段
     if (oldVersion < 2) {
       try {
-        await db.execute('ALTER TABLE groups ADD COLUMN show_in_session_list INTEGER NOT NULL DEFAULT 1');
+        await db.execute(
+            'ALTER TABLE groups ADD COLUMN show_in_session_list INTEGER NOT NULL DEFAULT 1');
       } catch (e) {
         // 字段可能已存在，忽略错误
       }
@@ -224,7 +245,7 @@ class DatabaseService {
     final db = await database;
     String? where;
     List<dynamic>? whereArgs;
-    
+
     if (showInSessionList != null) {
       where = 'is_active = ? AND show_in_session_list = ?';
       whereArgs = [1, showInSessionList ? 1 : 0];
@@ -232,7 +253,7 @@ class DatabaseService {
       where = 'is_active = ?';
       whereArgs = [1];
     }
-    
+
     final List<Map<String, dynamic>> maps = await db.query(
       'groups',
       where: where,
@@ -313,7 +334,8 @@ class DatabaseService {
   }
 
   /// 更新群聊在会话列表中的显示状态
-  Future<void> updateGroupShowInSessionList(String groupId, bool showInSessionList) async {
+  Future<void> updateGroupShowInSessionList(
+      String groupId, bool showInSessionList) async {
     final db = await database;
     await db.update(
       'groups',
@@ -386,8 +408,7 @@ class DatabaseService {
   }
 
   /// 根据atName获取群成员
-  Future<GroupMember?> getMemberByAtName(
-      String groupId, String atName) async {
+  Future<GroupMember?> getMemberByAtName(String groupId, String atName) async {
     final db = await database;
     final List<Map<String, dynamic>> maps = await db.query(
       'group_members',

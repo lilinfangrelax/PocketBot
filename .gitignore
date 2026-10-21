@@ -95,3 +95,5 @@ PocketBot-Windows-*/
 .cursor/
 .claude/
 .agents/
+# Teshi runtime state (endpoint token, daemon, replay screenshots)
+.teshi/

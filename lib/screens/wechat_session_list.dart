@@ -252,7 +252,8 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
       // 群聊
       _navigateToGroupChat(sessionItem.groupChat!);
     } else {
-      final contact = await _contactForSession(sessionItem.personalSession!.key);
+      final contact =
+          await _contactForSession(sessionItem.personalSession!.key);
       if (!mounted) return;
       if (contact != null) {
         await openContactChat(context, contact);
@@ -536,13 +537,19 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
       commands: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          fluent.IconButton(
-            icon: const Icon(fluent.WindowsIcons.search),
-            onPressed: _showSearch,
+          fluent.Tooltip(
+            message: '搜索会话',
+            child: fluent.IconButton(
+              icon: const Icon(fluent.WindowsIcons.search),
+              onPressed: _showSearch,
+            ),
           ),
-          fluent.IconButton(
-            icon: const Icon(fluent.WindowsIcons.add),
-            onPressed: _createSession,
+          fluent.Tooltip(
+            message: '新建会话',
+            child: fluent.IconButton(
+              icon: const Icon(fluent.WindowsIcons.add),
+              onPressed: _createSession,
+            ),
           ),
         ],
       ),
@@ -643,93 +650,105 @@ class _SessionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = FluentColors.of(context);
-    return fluent.HoverButton(
-      onPressed: onTap,
-      builder: (context, states) {
-        final Color background;
-        if (states.isPressed) {
-          background = colors.stroke;
-        } else if (selected) {
-          background = colors.accentSubtle;
-        } else {
-          background = const Color(0x00000000);
-        }
-        return ColoredBox(
-          color: background,
-          child: Padding(
-            padding: const EdgeInsetsDirectional.only(start: 16),
-            child: Row(
-              children: [
-                avatar,
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsetsDirectional.only(
-                      top: 14,
-                      bottom: 14,
-                      end: 16,
-                    ),
-                    decoration: BoxDecoration(
-                      border: Border(
-                        bottom: BorderSide(color: colors.stroke),
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: [
+        title,
+        if (unreadCount > 0) '$unreadCount 条未读',
+        if (preview.isNotEmpty) preview,
+        if (time.isNotEmpty) time,
+      ].join('，'),
+      onTap: onTap,
+      excludeSemantics: true,
+      child: fluent.HoverButton(
+        onPressed: onTap,
+        builder: (context, states) {
+          final Color background;
+          if (states.isPressed) {
+            background = colors.stroke;
+          } else if (selected) {
+            background = colors.accentSubtle;
+          } else {
+            background = const Color(0x00000000);
+          }
+          return ColoredBox(
+            color: background,
+            child: Padding(
+              padding: const EdgeInsetsDirectional.only(start: 16),
+              child: Row(
+                children: [
+                  avatar,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsetsDirectional.only(
+                        top: 14,
+                        bottom: 14,
+                        end: 16,
+                      ),
+                      decoration: BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(color: colors.stroke),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  title,
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                    color: colors.textPrimary,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                time,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: colors.textTertiary,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 3),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  preview,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: colors.textSecondary,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (unreadCount > 0) ...[
+                                const SizedBox(width: 8),
+                                UnreadBadge(count: unreadCount),
+                              ],
+                            ],
+                          ),
+                        ],
                       ),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                title,
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
-                                  color: colors.textPrimary,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              time,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: colors.textTertiary,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 3),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                preview,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: colors.textSecondary,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            if (unreadCount > 0) ...[
-                              const SizedBox(width: 8),
-                              UnreadBadge(count: unreadCount),
-                            ],
-                          ],
-                        ),
-                      ],
-                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 }
