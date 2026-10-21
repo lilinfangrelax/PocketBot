@@ -238,7 +238,7 @@ class GroupChatService {
         final contact = contactResults.first;
         userName = contact['name'] as String? ?? userName;
         userAvatar = contact['avatar'] as String?;
-        atName = contact['atName'] as String?;
+        atName = contact['at_name'] as String?;
       }
       
       await db.insert('group_members', {
