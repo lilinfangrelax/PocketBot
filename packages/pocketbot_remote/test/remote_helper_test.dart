@@ -92,6 +92,61 @@ void main() {
     );
   });
 
+  test('windows path search skips the extensionless npm shim', () {
+    final files = <String>{
+      r'C:\Users\me\AppData\Roaming\npm\npx',
+      r'C:\Users\me\AppData\Roaming\npm\npx.cmd',
+      r'C:\Users\me\AppData\Roaming\npm\npx.ps1',
+      r'C:\Program Files\nodejs\npx.cmd',
+      r'C:\Program Files\nodejs\node.exe',
+    };
+    final folded = files.map((path) => path.toLowerCase()).toSet();
+    bool exists(String path) => folded.contains(path.toLowerCase());
+    const env = {
+      'PATH': r'C:\Users\me\AppData\Roaming\npm;C:\Program Files\nodejs',
+      'PATHEXT': '.COM;.EXE;.BAT;.CMD',
+    };
+
+    expect(
+      resolveOnPath('npx', environment: env, windows: true, exists: exists),
+      r'C:\Users\me\AppData\Roaming\npm\npx.CMD',
+    );
+    expect(
+      resolveOnPath('node', environment: env, windows: true, exists: exists),
+      r'C:\Program Files\nodejs\node.EXE',
+    );
+    expect(
+      resolveOnPath(
+        'npx.cmd',
+        environment: env,
+        windows: true,
+        exists: exists,
+      ),
+      r'C:\Users\me\AppData\Roaming\npm\npx.cmd',
+    );
+
+    final scriptOnly = <String>{r'C:\npm\npx', r'C:\node\npx.cmd'};
+    expect(
+      resolveOnPath(
+        'npx',
+        environment: const {'PATH': r'C:\npm;C:\node'},
+        windows: true,
+        exists: (path) =>
+            scriptOnly.any((file) => file.toLowerCase() == path.toLowerCase()),
+      ),
+      r'C:\node\npx.CMD',
+    );
+    expect(
+      resolveOnPath(
+        'npx',
+        environment: const {'PATH': '/usr/local/bin:/usr/bin'},
+        windows: false,
+        exists: (path) => path == '/usr/local/bin/npx',
+      ),
+      '/usr/local/bin/npx',
+    );
+  });
+
   test('parseRunArgs keeps the agent command after --', () {
     final options = parseRunArgs(const [
       '--session',
@@ -161,7 +216,8 @@ void main() {
   test('rejects an archive whose sha256 does not match', () async {
     final root = await Directory.systemTemp.createTemp('pocketbot-agent');
     addTearDown(() => root.delete(recursive: true));
-    final zip = _zip(Archive()..addFile(ArchiveFile('bin/tool', 2, utf8.encode('ok'))));
+    final zip =
+        _zip(Archive()..addFile(ArchiveFile('bin/tool', 2, utf8.encode('ok'))));
     expect(
       ensureCachedAgent(
         root: root,
@@ -197,7 +253,8 @@ void main() {
     expect(File('${root.path}/agents/tool/outside.txt').existsSync(), isFalse);
   });
 
-  test('failed archive download can fall back to an installed command', () async {
+  test('failed archive download can fall back to an installed command',
+      () async {
     final argv = await resolveLaunchArgv(
       argv: const ['acp'],
       archiveUrl: 'https://example.com/missing.tar.gz',
@@ -215,7 +272,8 @@ void main() {
     );
   });
 
-  test('daemon rejects a bad token and forwards the launch environment', () async {
+  test('daemon rejects a bad token and forwards the launch environment',
+      () async {
     final launches = <AgentLaunch>[];
     final daemon = await RemoteDaemon.start(
       version: 'test',
@@ -294,7 +352,8 @@ Future<Map<String, dynamic>> _handshake(
   RemoteDaemon daemon, {
   required String token,
 }) async {
-  final socket = await Socket.connect(InternetAddress.loopbackIPv4, daemon.port);
+  final socket =
+      await Socket.connect(InternetAddress.loopbackIPv4, daemon.port);
   socket.write('${jsonEncode({'token': token, 'op': 'attach'})}\n');
   final line = await socket
       .cast<List<int>>()
@@ -332,7 +391,8 @@ class _Attached {
   final bool resumed;
   final Stream<List<int>> _chunks;
 
-  Future<List<int>> nextChunk() => _chunks.first.timeout(const Duration(seconds: 2));
+  Future<List<int>> nextChunk() =>
+      _chunks.first.timeout(const Duration(seconds: 2));
   Future<void> close() => socket.close();
 }
 
@@ -343,7 +403,8 @@ Future<_Attached> _attach(
   bool fresh = false,
   Map<String, String> env = const {},
 }) async {
-  final socket = await Socket.connect(InternetAddress.loopbackIPv4, daemon.port);
+  final socket =
+      await Socket.connect(InternetAddress.loopbackIPv4, daemon.port);
   socket.write('${jsonEncode({
         'token': 'secret',
         'op': 'attach',
