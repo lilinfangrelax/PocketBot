@@ -656,7 +656,9 @@ class WebSocketService with ChangeNotifier {
         methodId = id;
         break;
       }
-      if (id.isNotEmpty) methodId = id;
+      if (id.isNotEmpty && methodId == 'cursor_login') {
+        methodId = id;
+      }
     }
     Logger.info('[ACP] Authenticating with $methodId');
     await _request(

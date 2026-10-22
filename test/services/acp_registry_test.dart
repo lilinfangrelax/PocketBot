@@ -1,7 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/services/acp_registry.dart';
 import 'package:pocketbot_remote/pocketbot_remote.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   const registry = '''
@@ -202,5 +207,41 @@ void main() {
       ),
       predicate<GatewayInfo>((gateway) => gateway.command == 'agent' && gateway.archiveUrl == null),
     );
+  });
+
+  group('AcpRegistryCatalog.load', () {
+    test('downloads, parses and caches the catalog', () async {
+      SharedPreferences.setMockInitialValues({});
+      final client = MockClient((request) async {
+        expect(request.url, Uri.parse(acpRegistryUrl));
+        return http.Response(registry, 200);
+      });
+
+      final agents = await AcpRegistryCatalog.load(client: client);
+      expect(agents.map((agent) => agent.id), ['cursor', 'fast-agent', 'gemini']);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString(acpRegistryCacheKey), registry);
+    });
+
+    test('falls back to the cached catalog when the download fails', () async {
+      SharedPreferences.setMockInitialValues({acpRegistryCacheKey: registry});
+      final client = MockClient((_) async => http.Response('offline', 503));
+
+      final agents = await AcpRegistryCatalog.load(client: client);
+      expect(agents, hasLength(3));
+      expect(agents.first.id, 'cursor');
+    });
+
+    test('reports an unavailable registry without a cache', () async {
+      SharedPreferences.setMockInitialValues({});
+      final client = MockClient((_) async => throw const SocketException('offline'));
+
+      await expectLater(
+        AcpRegistryCatalog.load(client: client),
+        throwsA(
+          predicate((error) => '$error'.contains('REGISTRY_UNAVAILABLE')),
+        ),
+      );
+    });
   });
 }

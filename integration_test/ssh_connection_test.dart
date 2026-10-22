@@ -41,7 +41,7 @@ void main() {
         matching: find.byType(Scrollable),
       );
       await tester.scrollUntilVisible(
-        find.text('登录并选择目录'),
+        find.text('保存并登录'),
         300,
         scrollable: homeScroll.first,
       );
@@ -58,11 +58,11 @@ void main() {
       );
 
       await tester.scrollUntilVisible(
-        find.text('登录并选择目录'),
+        find.text('保存并登录'),
         300,
         scrollable: homeScroll.first,
       );
-      await tester.tap(find.text('登录并选择目录'));
+      await tester.tap(find.text('保存并登录'));
       await tester.pumpAndSettle();
       await pumpUntil(
         tester,

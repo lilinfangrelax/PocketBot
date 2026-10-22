@@ -227,7 +227,7 @@ class AIContactService {
     // 创建新映射
     final now = DateTime.now();
     final mapping = ContactSessionMapping(
-      id: 'mapping_${now.millisecondsSinceEpoch}',
+      id: 'mapping_${contactId}_$groupId',
       contactId: contactId,
       groupId: groupId,
       sessionKey: sessionKey,

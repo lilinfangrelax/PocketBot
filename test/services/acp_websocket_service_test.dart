@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pocket_bot/models/attachment.dart';
 import 'package:pocket_bot/models/mcp_server_config.dart';
 import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/services/acp_file_system.dart';
@@ -1153,18 +1154,891 @@ void main() {
       throwsA(anything),
     );
   });
+
+  group('connection negotiation', () {
+    test('rejects unsupported ACP protocol versions', () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+
+      final initialized = service.connectWithTransport(transport);
+      await transport.waitForMethod('initialize');
+      transport.respondToLast({
+        'protocolVersion': 2,
+        'agentCapabilities': <String, dynamic>{},
+      });
+
+      await expectLater(
+        initialized,
+        throwsA(predicate(
+          (error) => '$error'.contains('Unsupported ACP protocol version: 2'),
+        )),
+      );
+      expect(service.isConnected, isFalse);
+      expect(
+        service.errorMessage,
+        contains('Unsupported ACP protocol version: 2'),
+      );
+    });
+
+    test('falls back to the first advertised auth method', () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+
+      await _connectFake(
+        service,
+        transport,
+        authMethods: [
+          {'id': 'oauth', 'name': 'OAuth'},
+          {'id': 'token', 'name': 'Token'},
+        ],
+      );
+
+      expect(
+        transport.sent.map((request) => request['method']),
+        containsAllInOrder(['initialize', 'authenticate']),
+      );
+      expect(transport.sent[1]['params']['methodId'], 'oauth');
+    });
+
+    test('surfaces transport startup errors before initialize', () async {
+      final transport =
+          _FakeAcpTransport(startupError: 'AGENT_EXIT:agent missing');
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+
+      await expectLater(
+        service.connectWithTransport(transport),
+        throwsA(predicate(
+          (error) => '$error'.contains('AGENT_EXIT:agent missing'),
+        )),
+      );
+      expect(service.isConnected, isFalse);
+      expect(service.errorMessage, 'AGENT_EXIT:agent missing');
+      expect(transport.sent, isEmpty);
+    });
+
+    test('skips initialize when the helper resumed an agent process',
+        () async {
+      final transport = _FakeAcpTransport(resumed: true);
+      final service = WebSocketService();
+      service.transportOpener = (_) async => transport;
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+      service.createNewSession();
+      final localKey = service.currentSessionKey!;
+
+      await service.connectTarget(
+        GatewayInfo.local(workingDirectory: Directory.current.path),
+        resume: true,
+      );
+
+      expect(service.isConnected, isTrue);
+      expect(service.currentSessionKey, localKey);
+      expect(transport.sent, isEmpty);
+    });
+
+    test('reports transport errors and unexpected disconnects', () async {
+      final failed = _FakeAcpTransport();
+      final failedService = WebSocketService();
+      addTearDown(() async {
+        await failedService.disconnect();
+        await failed.close();
+      });
+      await _connectFake(failedService, failed);
+      failed.pushError(Exception('agent crashed'));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(failedService.isConnected, isFalse);
+      expect(failedService.errorMessage, startsWith('CONNECTION_ERROR:'));
+
+      final ended = _FakeAcpTransport();
+      final endedService = WebSocketService();
+      addTearDown(() async {
+        endedService.cancelReconnect();
+        await endedService.disconnect();
+        await ended.close();
+      });
+      await _connectFake(endedService, ended);
+      endedService.setPendingGateway(GatewayInfo.local());
+      await ended.endIncoming();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(endedService.isConnected, isFalse);
+      expect(endedService.errorMessage, 'CONNECTION_CLOSED:ACP 连接意外断开');
+      expect(endedService.isReconnecting, isTrue);
+      expect(endedService.reconnectCountdown, 3);
+
+      endedService.cancelReconnect();
+      expect(endedService.isReconnecting, isFalse);
+    });
+  });
+
+  group('session attachment', () {
+    test('resumes sessions before falling back to session/load', () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+      await _connectFake(service, transport, capabilities: {
+        'sessionCapabilities': {
+          'resume': <String, dynamic>{},
+          'load': <String, dynamic>{},
+        },
+        'loadSession': true,
+      });
+
+      final resuming = service.ensureRemoteSession('saved-1');
+      final request = await transport.waitForMethod('session/resume');
+      expect(request['params']['sessionId'], 'saved-1');
+      expect(request['params']['cwd'], '/');
+      expect(request['params']['mcpServers'], isEmpty);
+      transport.respondToLast({
+        'configOptions': [
+          {
+            'configId': 'mode',
+            'name': 'Mode',
+            'category': 'mode',
+            'type': 'select',
+            'currentValue': 'plan',
+            'options': [
+              {'value': 'agent', 'name': 'Agent'},
+              {'value': 'plan', 'name': 'Plan'},
+            ],
+          },
+        ],
+      });
+
+      expect(await resuming, 'saved-1');
+      expect(service.configOptions.single.currentId, 'plan');
+      expect(service.currentModeId, 'plan');
+
+      expect(await service.ensureRemoteSession('saved-1'), 'saved-1');
+      expect(
+        transport.sent.where((item) => item['method'] == 'session/resume'),
+        hasLength(1),
+      );
+    });
+
+    test('refuses to attach a session the agent cannot resume', () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+      await _connectFake(service, transport);
+
+      await expectLater(
+        service.ensureRemoteSession('saved-1'),
+        throwsA(predicate((error) => '$error'.contains('cannot resume'))),
+      );
+      expect(
+        transport.sent.where((item) =>
+            item['method'] == 'session/resume' ||
+            item['method'] == 'session/load'),
+        isEmpty,
+      );
+    });
+
+    test('migrates a local session onto a new agent session', () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+      await _connectFake(service, transport);
+      service.createNewSession();
+      final localKey = service.currentSessionKey!;
+      expect(localKey, startsWith('local-'));
+
+      final sending = service.sendMessage('Hello agent');
+      await transport.waitForMethod('session/new');
+      transport.respondToLast({'sessionId': 'remote-1'});
+      await sending;
+
+      expect(service.currentSessionKey, 'remote-1');
+      expect(service.getSession(localKey), isNull);
+      final messages = service.getSession('remote-1')!.messages;
+      expect(messages.single.text, 'Hello agent');
+      expect(messages.single.isUser, isTrue);
+      final prompt = transport.sent.lastWhere(
+        (item) => item['method'] == 'session/prompt',
+      );
+      expect(prompt['params']['sessionId'], 'remote-1');
+    });
+
+    test('lists and deletes remote sessions through session capabilities',
+        () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+      await _connectFake(service, transport, capabilities: {
+        'sessionCapabilities': {
+          'list': <String, dynamic>{},
+          'delete': <String, dynamic>{},
+        },
+      });
+
+      final listing = service.getGatewaySessions();
+      final listRequest = await transport.waitForMethod('session/list');
+      expect(listRequest['params'], isEmpty);
+      transport.respondToLast({
+        'sessions': [
+          {
+            'sessionId': 'remote-1',
+            'title': 'First chat',
+            'updatedAt': '2026-10-01T12:00:00Z',
+          },
+          {'sessionId': '', 'title': 'missing id'},
+        ],
+      });
+      final sessions = await listing;
+      expect(sessions.map((session) => session.key), ['remote-1']);
+      expect(sessions.single.title, 'First chat');
+      expect(sessions.single.lastUpdated, DateTime.utc(2026, 10, 1, 12));
+
+      final deleting = service.deleteSession('remote-1');
+      final deleteRequest = await transport.waitForMethod('session/delete');
+      expect(deleteRequest['params']['sessionId'], 'remote-1');
+      transport.respondToLast(<String, dynamic>{});
+      await deleting;
+
+      service.createNewSession();
+      final localKey = service.currentSessionKey!;
+      await service.deleteSession(localKey);
+      expect(
+        transport.sent.where((item) => item['method'] == 'session/delete'),
+        hasLength(1),
+      );
+      expect(service.currentSessionKey, isNull);
+    });
+
+    test('skips session listing when the agent cannot list', () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+      await _connectFake(service, transport);
+
+      expect(await service.getGatewaySessions(), isEmpty);
+      expect(
+        transport.sent.where((item) => item['method'] == 'session/list'),
+        isEmpty,
+      );
+    });
+  });
+
+  group('prompt attachments', () {
+    test('rejects attachments the agent does not advertise', () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+      await _connectFake(service, transport);
+
+      final imageFailure = expectLater(
+        service.sendMessageWithAttachments('Look', [
+          Attachment(
+            id: 'img',
+            filename: 'a.png',
+            mimeType: 'image/png',
+            size: 3,
+            data: 'aW1n',
+          ),
+        ]),
+        throwsA(predicate((error) => '$error'.contains('image prompts'))),
+      );
+      await transport.waitForMethod('session/new');
+      transport.respondToLast({'sessionId': 'session-1'});
+      await imageFailure;
+
+      await expectLater(
+        service.sendMessageWithAttachments('Read', [
+          Attachment(
+            id: 'doc',
+            filename: 'notes.txt',
+            mimeType: 'text/plain',
+            size: 4,
+            data: 'dGV4dA==',
+          ),
+        ]),
+        throwsA(
+          predicate((error) => '$error'.contains('embedded attachments')),
+        ),
+      );
+    });
+
+    test('sends image, embedded and linked resources when advertised',
+        () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+      await _connectFake(service, transport, capabilities: {
+        'promptCapabilities': {'image': true, 'embeddedContext': true},
+      });
+
+      final sending = service.sendMessageWithAttachments('Look', [
+        Attachment(
+          id: 'img',
+          filename: 'a.png',
+          mimeType: 'image/png',
+          size: 3,
+          data: 'aW1n',
+        ),
+        Attachment(
+          id: 'doc',
+          filename: 'notes.txt',
+          mimeType: 'text/plain',
+          size: 4,
+          data: 'dGV4dA==',
+        ),
+        Attachment(
+          id: 'link',
+          filename: 'spec.pdf',
+          mimeType: 'application/pdf',
+          size: 9,
+          url: 'https://example.com/spec.pdf',
+        ),
+      ]);
+      await transport.waitForMethod('session/new');
+      transport.respondToLast({'sessionId': 'session-1'});
+      final prompt = await transport.waitForMethod('session/prompt');
+      await sending;
+
+      expect(prompt['params']['prompt'], [
+        {'type': 'text', 'text': 'Look'},
+        {'type': 'image', 'mimeType': 'image/png', 'data': 'aW1n'},
+        {
+          'type': 'resource',
+          'resource': {
+            'uri': 'attachment://notes.txt',
+            'mimeType': 'text/plain',
+            'blob': 'dGV4dA==',
+          },
+        },
+        {
+          'type': 'resource_link',
+          'uri': 'https://example.com/spec.pdf',
+          'name': 'spec.pdf',
+          'mimeType': 'application/pdf',
+          'size': 9,
+        },
+      ]);
+    });
+
+    test('refuses an empty prompt', () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+      await _connectFake(service, transport);
+
+      final sending = expectLater(
+        service.sendMessageWithAttachments('', const []),
+        throwsA(predicate((error) => '$error'.contains('cannot be empty'))),
+      );
+      await transport.waitForMethod('session/new');
+      transport.respondToLast({'sessionId': 'session-1'});
+      await sending;
+    });
+
+    test('cancels a prompt that exceeds its wait timeout', () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+      await _connectFake(service, transport);
+      final creating = service.createGatewaySession('Group');
+      await transport.waitForMethod('session/new');
+      transport.respondToLast({'sessionId': 'group-session'});
+      await creating;
+
+      final reply = expectLater(
+        service.sendMessageAndWait(
+          'Hi',
+          sessionKey: 'group-session',
+          timeout: const Duration(milliseconds: 50),
+        ),
+        throwsA(isA<TimeoutException>()),
+      );
+      await transport.waitForMethod('session/prompt');
+      await reply;
+      final cancel = await transport.waitForMethod('session/cancel');
+      expect(cancel['params']['sessionId'], 'group-session');
+    });
+  });
+
+  group('cursor extensions', () {
+    test('renders cursor/create_plan as a plan message', () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+      await _connectFake(service, transport);
+
+      transport.push({
+        'jsonrpc': '2.0',
+        'id': 'plan-1',
+        'method': 'cursor/create_plan',
+        'params': {
+          'sessionId': 'session-1',
+          'name': 'Refactor',
+          'plan': '1. Read the code\n2. Write the fix',
+        },
+      });
+      final reply = await transport.waitForResponse('plan-1');
+      expect(reply['result']['outcome'], {'outcome': 'accepted'});
+      final message = service.getSession('session-1')!.messages.single;
+      expect(message.kind, MessageKind.plan);
+      expect(message.text, contains('**Refactor**'));
+      expect(message.text, contains('1. Read the code'));
+    });
+
+    test('merges cursor/update_todos into the session plan', () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+      await _connectFake(service, transport);
+
+      transport.push({
+        'jsonrpc': '2.0',
+        'id': 'todos-1',
+        'method': 'cursor/update_todos',
+        'params': {
+          'sessionId': 'session-1',
+          'todos': [
+            {'id': 'a', 'content': 'Read', 'status': 'pending'},
+            {'id': 'b', 'content': 'Write', 'status': 'in_progress'},
+          ],
+        },
+      });
+      final first = await transport.waitForResponse('todos-1');
+      expect(first['result']['outcome']['todos'], hasLength(2));
+      expect(service.todos.map((todo) => todo.id), ['a', 'b']);
+
+      transport.push({
+        'jsonrpc': '2.0',
+        'id': 'todos-2',
+        'method': 'cursor/update_todos',
+        'params': {
+          'sessionId': 'session-1',
+          'merge': true,
+          'todos': [
+            {'id': 'b', 'content': 'Write docs', 'status': 'completed'},
+            {'id': 'c', 'content': 'Ship', 'status': 'pending'},
+          ],
+        },
+      });
+      final second = await transport.waitForResponse('todos-2');
+      expect(second['result']['outcome']['todos'], hasLength(3));
+      expect(service.todos.map((todo) => todo.id), ['a', 'b', 'c']);
+      expect(
+        service.todos.firstWhere((todo) => todo.id == 'b').content,
+        'Write docs',
+      );
+      final plan = service.planFor('session-1');
+      expect(plan.map((entry) => entry.content), ['Read', 'Write docs', 'Ship']);
+      expect(
+        plan.firstWhere((entry) => entry.content == 'Write docs').isDone,
+        isTrue,
+      );
+    });
+
+    test('reports cursor tasks, generated images and unknown methods',
+        () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+      await _connectFake(service, transport);
+
+      transport.push({
+        'jsonrpc': '2.0',
+        'id': 'task-1',
+        'method': 'cursor/task',
+        'params': {'sessionId': 'session-1', 'description': 'Search the docs'},
+      });
+      final task = await transport.waitForResponse('task-1');
+      expect(task['result']['outcome'], {'outcome': 'completed'});
+      expect(
+        service.getSession('session-1')!.messages.last.text,
+        contains('Search the docs'),
+      );
+
+      transport.push({
+        'jsonrpc': '2.0',
+        'id': 'image-1',
+        'method': 'cursor/generate_image',
+        'params': {'sessionId': 'session-1', 'filePath': '/tmp/cover.png'},
+      });
+      final image = await transport.waitForResponse('image-1');
+      expect(image['result']['outcome']['outcome'], 'generated');
+      expect(image['result']['outcome']['filePath'], '/tmp/cover.png');
+      expect(
+        service.getSession('session-1')!.messages.last.text,
+        contains('/tmp/cover.png'),
+      );
+
+      transport.push({
+        'jsonrpc': '2.0',
+        'id': 'unknown-1',
+        'method': 'cursor/unknown_extension',
+        'params': {'sessionId': 'session-1'},
+      });
+      final unknown = await transport.waitForResponse('unknown-1');
+      expect(unknown['error']['code'], -32601);
+
+      transport.push({
+        'jsonrpc': '2.0',
+        'id': 'unknown-2',
+        'method': 'terminal/create',
+        'params': <String, dynamic>{},
+      });
+      final unsupported = await transport.waitForResponse('unknown-2');
+      expect(unsupported['error']['code'], -32601);
+    });
+  });
+
+  group('session updates', () {
+    test('streams thoughts and drops leaked error chunks', () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+      await _connectFake(service, transport);
+
+      transport.push({
+        'jsonrpc': '2.0',
+        'method': 'session/update',
+        'params': {
+          'sessionId': 'session-1',
+          'update': {
+            'sessionUpdate': 'agent_thought_chunk',
+            'content': {'type': 'text', 'text': 'Planning the fix'},
+          },
+        },
+      });
+      transport.push({
+        'jsonrpc': '2.0',
+        'method': 'session/update',
+        'params': {
+          'sessionId': 'session-1',
+          'update': {
+            'sessionUpdate': 'agent_thought_chunk',
+            'content': {
+              'type': 'text',
+              'text': '\n\nError: RetriableError: WritableIterable is closed',
+            },
+          },
+        },
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+
+      final messages = service.getSession('session-1')!.messages;
+      expect(messages, hasLength(1));
+      expect(messages.single.kind, MessageKind.thought);
+      expect(messages.single.text, contains('Planning the fix'));
+      expect(messages.single.text, isNot(contains('RetriableError')));
+    });
+
+    test('renders image chunks and applies metadata updates', () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+      await _connectFake(service, transport);
+
+      transport.push({
+        'jsonrpc': '2.0',
+        'method': 'session/update',
+        'params': {
+          'sessionId': 'session-1',
+          'update': {
+            'sessionUpdate': 'agent_message_chunk',
+            'messageId': 'image-1',
+            'content': {
+              'type': 'image',
+              'mimeType': 'image/png',
+              'data': 'aW1n',
+            },
+          },
+        },
+      });
+      transport.push({
+        'jsonrpc': '2.0',
+        'method': 'session/update',
+        'params': {
+          'sessionId': 'session-1',
+          'update': {
+            'sessionUpdate': 'current_mode_update',
+            'currentModeId': 'plan',
+          },
+        },
+      });
+      transport.push({
+        'jsonrpc': '2.0',
+        'method': 'session/update',
+        'params': {
+          'sessionId': 'session-1',
+          'update': {'sessionUpdate': 'usage_update', 'model': 'gpt-5'},
+        },
+      });
+      transport.push({
+        'jsonrpc': '2.0',
+        'method': 'session/update',
+        'params': {
+          'sessionId': 'session-1',
+          'update': {
+            'sessionUpdate': 'session_info_update',
+            'title': 'Generated title',
+          },
+        },
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      final session = service.getSession('session-1')!;
+      expect(session.messages.single.attachments.single.data, 'aW1n');
+      expect(session.messages.single.text, isEmpty);
+      expect(service.currentModeId, 'plan');
+      expect(session.model, 'gpt-5');
+      expect(session.customTitle, 'Generated title');
+
+      transport.push({
+        'jsonrpc': '2.0',
+        'method': 'session/update',
+        'params': {
+          'sessionId': 'session-1',
+          'update': {
+            'sessionUpdate': 'session_info_update',
+            'title': 'Ignored later title',
+          },
+        },
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(session.customTitle, 'Generated title');
+    });
+
+    test('forwards non-stream events and ignores invalid frames', () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+      await _connectFake(service, transport);
+      final events = <Map<String, dynamic>>[];
+      final subscription = service.events.listen(events.add);
+      addTearDown(subscription.cancel);
+
+      transport.push({
+        'jsonrpc': '2.0',
+        'method': 'session/update',
+        'params': {
+          'sessionId': 'session-1',
+          'update': {
+            'sessionUpdate': 'agent_message_chunk',
+            'messageId': 'agent-1',
+            'content': {'type': 'text', 'text': 'chunk'},
+          },
+        },
+      });
+      transport.push({
+        'jsonrpc': '2.0',
+        'method': 'session/update',
+        'params': {
+          'sessionId': 'session-1',
+          'update': {
+            'sessionUpdate': 'plan',
+            'entries': [
+              {'content': 'Step one', 'status': 'pending'},
+            ],
+          },
+        },
+      });
+      transport.pushRaw('not json');
+      transport.pushRaw('42');
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(events, hasLength(1));
+      expect(events.single['params']['update']['sessionUpdate'], 'plan');
+      expect(
+        service.getSession('session-1')!.messages.single.text,
+        'chunk',
+      );
+    });
+  });
+
+  group('modes and configuration', () {
+    test('sets a mode with session/set_mode without a mode config', () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+      await _connectFake(service, transport);
+      final sending = service.sendMessage('Hello');
+      await transport.waitForMethod('session/new');
+      transport.respondToLast({'sessionId': 'session-1'});
+      await sending;
+
+      final setting = service.setSessionMode('plan');
+      final request = await transport.waitForMethod('session/set_mode');
+      expect(request['params'], {'sessionId': 'session-1', 'modeId': 'plan'});
+      transport.respondToLast(<String, dynamic>{});
+      await setting;
+      expect(service.currentModeId, 'plan');
+    });
+
+    test('updates a config value locally when the agent omits options',
+        () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+      await _connectFake(service, transport);
+      final sending = service.sendMessage('Hello');
+      await transport.waitForMethod('session/new');
+      transport.respondToLast({
+        'sessionId': 'session-1',
+        'configOptions': [
+          {
+            'id': 'model',
+            'name': 'Model',
+            'category': 'model',
+            'type': 'select',
+            'currentValue': 'grok-4.6',
+            'options': [
+              {'value': 'grok-4.6', 'name': 'Grok 4.6'},
+              {'value': 'composer-2.5', 'name': 'Composer 2.5'},
+            ],
+          },
+        ],
+      });
+      await sending;
+
+      final setting = service.setConfigOption('model', 'composer-2.5');
+      final request = await transport.waitForMethod('session/set_config_option');
+      expect(request['params']['type'], 'id');
+      expect(request['params']['value'], 'composer-2.5');
+      transport.respondToLast(<String, dynamic>{});
+      await setting;
+      expect(service.configOptions.single.currentId, 'composer-2.5');
+    });
+
+    test('reads legacy models metadata as a model config option', () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        await service.disconnect();
+        await transport.close();
+      });
+      await _connectFake(service, transport);
+      final sending = service.sendMessage('Hello');
+      await transport.waitForMethod('session/new');
+      transport.respondToLast({
+        'sessionId': 'session-1',
+        'models': {
+          'currentModelId': 'm-1',
+          'availableModels': [
+            {'modelId': 'm-1', 'name': 'Model One'},
+            {'id': 'm-2', 'name': 'Model Two'},
+            {'name': 'ignored'},
+          ],
+        },
+      });
+      await sending;
+
+      final option = service.configOptions.single;
+      expect(option.id, 'model');
+      expect(option.currentId, 'm-1');
+      expect(option.options.map((value) => value.value), ['m-1', 'm-2']);
+    });
+  });
+
+  test('reports file system failures as ACP errors', () async {
+    final transport = _FakeAcpTransport(fileSystem: _ThrowingFileSystem());
+    final service = WebSocketService();
+    addTearDown(() async {
+      await service.disconnect();
+      await transport.close();
+    });
+    await _connectFake(service, transport);
+
+    transport.push({
+      'jsonrpc': '2.0',
+      'id': 'read-1',
+      'method': 'fs/read_text_file',
+      'params': {'sessionId': 's', 'path': '/denied.txt'},
+    });
+    final read = await transport.waitForResponse('read-1');
+    expect(read['error']['code'], -32000);
+
+    transport.push({
+      'jsonrpc': '2.0',
+      'id': 'write-1',
+      'method': 'fs/write_text_file',
+      'params': {'sessionId': 's', 'path': '/denied.txt', 'content': 'x'},
+    });
+    final write = await transport.waitForResponse('write-1');
+    expect(write['error']['code'], -32000);
+  });
 }
 
 Future<void> _connectFake(
   WebSocketService service,
   _FakeAcpTransport transport, {
   List<dynamic> authMethods = const [],
+  Map<String, dynamic> capabilities = const {},
 }) async {
   final initialized = service.connectWithTransport(transport);
   await transport.waitForMethod('initialize');
   transport.respondToLast({
     'protocolVersion': 1,
-    'agentCapabilities': <String, dynamic>{},
+    'agentCapabilities': capabilities,
     'agentInfo': {'name': 'cursor-agent'},
     'authMethods': authMethods,
   });
@@ -1176,11 +2050,19 @@ Future<void> _connectFake(
 }
 
 class _FakeAcpTransport implements AcpTransport {
-  _FakeAcpTransport({this.fileSystem});
+  _FakeAcpTransport({
+    this.fileSystem,
+    this.startupError,
+    bool resumed = false,
+  }) : _resumed = resumed;
 
   @override
   final AcpFileSystem? fileSystem;
 
+  @override
+  final String? startupError;
+
+  final bool _resumed;
   final _incoming = StreamController<dynamic>.broadcast();
   final sent = <Map<String, dynamic>>[];
 
@@ -1198,10 +2080,7 @@ class _FakeAcpTransport implements AcpTransport {
   }
 
   @override
-  Future<bool> get resumed async => false;
-
-  @override
-  String? get startupError => null;
+  Future<bool> get resumed async => _resumed;
 
   @override
   void release() {}
@@ -1213,6 +2092,16 @@ class _FakeAcpTransport implements AcpTransport {
   void pushMap(Map<String, dynamic> message) {
     _incoming.add(message);
   }
+
+  void pushRaw(String frame) {
+    _incoming.add(frame);
+  }
+
+  void pushError(Object error) {
+    _incoming.addError(error);
+  }
+
+  Future<void> endIncoming() => _incoming.close();
 
   void respondToLast(Map<String, dynamic> result) {
     final request = sent.last;
@@ -1271,4 +2160,17 @@ class _MemoryFileSystem implements AcpFileSystem {
   Future<void> writeText(String path, String content) async {
     files[path] = content;
   }
+}
+
+class _ThrowingFileSystem implements AcpFileSystem {
+  @override
+  String resolve(String path, String workingDirectory) => path;
+
+  @override
+  Future<String> readText(String path) async =>
+      throw const FileSystemException('permission denied');
+
+  @override
+  Future<void> writeText(String path, String content) async =>
+      throw const FileSystemException('permission denied');
 }

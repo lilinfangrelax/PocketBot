@@ -18,6 +18,7 @@ Feature 位于 `features/zh-CN/`，步骤文本不包含选择器。
 | 会话历史与多会话 | `@integration` | `session_history_test.dart` | 重启恢复历史、多会话切换互不串消息、删除会话同步移除存储 |
 | 工具调用与权限确认 | `@integration` | `tool_permission_test.dart` | 允许一次后工具完成、拒绝后工具失败并继续回复 |
 | 群聊@路由 | `@integration` | `group_at_routing_test.dart` | 真实群聊界面中被 @ 的联系人回复、未 @ 时不触发、多代理分别回复、失效连接仅提示失败 |
+| ACP能力与计划 | `@integration` | `acp_capabilities_test.dart` | 代理配置选项（模型/模式）展示与切换、计划面板展开、`cursor/update_todos` 待办、`available_commands_update` 斜杠命令、代理 fs 读写 |
 | 通讯录与AI联系人 | `@integration` | `ai_contact_test.dart` | AI 联系人创建与代理绑定、从通讯录打开聊天 |
 | 通讯录联系人管理 | `@integration` | `contact_management_test.dart` | 详情中改名后详情与列表同步、删除后列表隐藏且存储中停用 |
 | 设置与MCP | `@integration` | `settings_mcp_test.dart` | 添加 stdio MCP 服务器后列表与配置持久化、删除后列表与配置同步移除 |
@@ -67,7 +68,12 @@ flutter test integration_test/manual/real_ssh_test.dart -d windows
 | `e2e-stream` | 间隔 900ms 推送 `MOCK_STREAM:1..3`，用于观察流式过程 |
 | `e2e-slow` | 推送首块后等待取消；收到 `session/cancel` 返回 `stopReason: cancelled`，否则 30 秒后补发第二块 |
 | `e2e-markdown` | 推送包含代码块的 Markdown 回复 |
+| `e2e-plan` | 推送三步计划（1 完成、1 进行中、1 待办）后回复 `MOCK_PLAN_OK`，用于验收计划面板 |
+| `e2e-todos` | 发送 `cursor/update_todos` 通知（1 完成、1 进行中）后回复 `MOCK_TODOS_OK`，用于验收待办横幅 |
+| `e2e-fs` | 通过 `fs/write_text_file` 写入 `pocketbot-e2e-fs.txt`、读回并删除后回复 `MOCK_FS: E2E_FS_OK`，用于验收客户端文件系统能力 |
 | `e2e-tool` | 发出 `pending` 工具调用「运行 E2E 命令」并请求 `session/request_permission`；选择 `allow_once` 时工具变为 `completed` 并回复 `MOCK_TOOL_ALLOWED`，选择 `reject_once` 时变为 `failed` 并回复 `MOCK_TOOL_DENIED` |
+
+`session/new` 还会下发 `configOptions`（`model`: Mock Fast / Mock Smart，`mode`: Agent / Plan）与 `available_commands_update`（`/reset`、`/plan`）；`session/set_config_option`、`session/set_mode` 会更新会话状态并返回最新选项。
 
 它只在 Debug 构建中、`agentId == "pocketbot-mock"` 且设置了 `POCKETBOT_E2E_MOCK_AGENT` 时启用，Release 构建不会包含该分支。
 

@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/services/acp_transport.dart';
 
 void main() {
@@ -178,6 +181,51 @@ void main() {
         formatRemoteAgentExit(exitCode: 1),
         contains('退出码 1'),
       );
+    });
+  });
+
+  group('LocalStdioTransport', () {
+    test('rejects a missing working directory before spawning', () async {
+      final missing = '${Directory.systemTemp.path}${Platform.pathSeparator}'
+          'pocketbot-missing-${DateTime.now().microsecondsSinceEpoch}';
+      await expectLater(
+        LocalStdioTransport.start(
+          GatewayInfo.local(workingDirectory: missing),
+        ),
+        throwsA(
+          predicate(
+            (error) => '$error'.contains('AGENT_SPAWN_FAILED:工作目录不存在'),
+          ),
+        ),
+      );
+    });
+
+    test('surfaces a spawn failure on the incoming stream', () async {
+      final directory = await Directory.systemTemp.createTemp('pocketbot-cwd-');
+      addTearDown(() async {
+        if (directory.existsSync()) await directory.delete(recursive: true);
+      });
+      final missingAgent =
+          '${directory.path}${Platform.pathSeparator}missing-agent.exe';
+      final transport = await LocalStdioTransport.start(
+        GatewayInfo.local(
+          workingDirectory: directory.path,
+          command: missingAgent,
+        ),
+      );
+      addTearDown(transport.close);
+
+      final errors = <Object>[];
+      final subscription = transport.incoming.listen(
+        (_) {},
+        onError: errors.add,
+      );
+      addTearDown(subscription.cancel);
+      final deadline = DateTime.now().add(const Duration(seconds: 3));
+      while (errors.isEmpty && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(errors, isNotEmpty);
     });
   });
 }

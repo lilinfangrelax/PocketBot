@@ -13,6 +13,7 @@ Future<void> main(List<String> args) async {
   var requestCounter = 0;
   final pendingClientResponses = <String, Completer<Map<String, dynamic>>>{};
   final activePrompts = <String, _ActivePrompt>{};
+  final sessionConfigs = <String, Map<String, String>>{};
 
   void send(Map<String, Object?> payload) {
     stdout.writeln(jsonEncode(payload));
@@ -30,12 +31,50 @@ Future<void> main(List<String> args) async {
     });
   }
 
+  Map<String, String> configFor(String sessionId) =>
+      sessionConfigs.putIfAbsent(
+        sessionId,
+        () => {'model': 'mock-fast', 'mode': 'agent'},
+      );
+
+  List<Map<String, Object?>> configOptionsFor(String sessionId) {
+    final config = configFor(sessionId);
+    return [
+      {
+        'id': 'model',
+        'name': 'Model',
+        'category': 'model',
+        'type': 'select',
+        'currentValue': config['model'],
+        'options': [
+          {'value': 'mock-fast', 'name': 'Mock Fast'},
+          {'value': 'mock-smart', 'name': 'Mock Smart'},
+        ],
+      },
+      {
+        'id': 'mode',
+        'name': 'Mode',
+        'category': 'mode',
+        'type': 'select',
+        'currentValue': config['mode'],
+        'options': [
+          {'value': 'agent', 'name': 'Agent'},
+          {'value': 'plan', 'name': 'Plan'},
+        ],
+      },
+    ];
+  }
+
   Map<String, Object?> sessionInfo(String sessionId) => {
         'sessionId': sessionId,
         'modes': {
-          'availableModes': <Object?>[],
-          'currentModeId': 'agent',
+          'availableModes': [
+            {'id': 'agent', 'name': 'Agent'},
+            {'id': 'plan', 'name': 'Plan'},
+          ],
+          'currentModeId': configFor(sessionId)['mode'],
         },
+        'configOptions': configOptionsFor(sessionId),
       };
 
   Future<void> sendUpdate(
@@ -98,7 +137,22 @@ Future<void> main(List<String> args) async {
       },
     });
     await stdout.flush();
-    return completer.future;
+    final response = await completer.future;
+    return (response['result'] as Map?)?.cast<String, dynamic>() ??
+        const <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> callClient(
+    String method,
+    Map<String, Object?> params,
+  ) async {
+    requestCounter += 1;
+    final id = 'mock-client-$requestCounter';
+    final completer = Completer<Map<String, dynamic>>();
+    pendingClientResponses[id] = completer;
+    send({'jsonrpc': '2.0', 'id': id, 'method': method, 'params': params});
+    await stdout.flush();
+    return completer.future.timeout(const Duration(seconds: 10));
   }
 
   Future<void> handlePrompt(
@@ -137,6 +191,87 @@ Future<void> main(List<String> args) async {
             sessionId,
             messageId,
             '**E2E Markdown**\n\n```dart\nprint(\'hello\');\n```',
+          );
+          respond(id, {'stopReason': 'end_turn'});
+          return;
+        case 'e2e-plan':
+          await sendUpdate(sessionId, {
+            'sessionUpdate': 'plan',
+            'entries': [
+              {
+                'content': '检查现有配置',
+                'status': 'completed',
+                'priority': 'high',
+              },
+              {
+                'content': '连接 Mock 代理',
+                'status': 'in_progress',
+                'priority': 'high',
+              },
+              {
+                'content': '发送验收消息',
+                'status': 'pending',
+                'priority': 'medium',
+              },
+            ],
+          });
+          await sendChunk(sessionId, messageId, 'MOCK_PLAN_OK');
+          respond(id, {'stopReason': 'end_turn'});
+          return;
+        case 'e2e-todos':
+          send({
+            'jsonrpc': '2.0',
+            'method': 'cursor/update_todos',
+            'params': {
+              'sessionId': sessionId,
+              'todos': [
+                {
+                  'id': 'todo-read',
+                  'content': '阅读 ACP 代码',
+                  'status': 'completed',
+                },
+                {
+                  'id': 'todo-test',
+                  'content': '补充 E2E 测试',
+                  'status': 'in_progress',
+                },
+              ],
+            },
+          });
+          await stdout.flush();
+          await sendChunk(sessionId, messageId, 'MOCK_TODOS_OK');
+          respond(id, {'stopReason': 'end_turn'});
+          return;
+        case 'e2e-fs':
+          const path = 'pocketbot-e2e-fs.txt';
+          final write = await callClient('fs/write_text_file', {
+            'sessionId': sessionId,
+            'path': path,
+            'content': 'E2E_FS_OK',
+          });
+          if (write['error'] != null) {
+            await sendChunk(
+              sessionId,
+              messageId,
+              'MOCK_FS_WRITE_ERROR: ${write['error']}',
+            );
+            respond(id, {'stopReason': 'end_turn'});
+            return;
+          }
+          final read = await callClient('fs/read_text_file', {
+            'sessionId': sessionId,
+            'path': path,
+          });
+          try {
+            File(path).deleteSync();
+          } catch (_) {}
+          final content = (read['result'] as Map?)?['content'];
+          await sendChunk(
+            sessionId,
+            messageId,
+            content == null
+                ? 'MOCK_FS_READ_ERROR: ${read['error']}'
+                : 'MOCK_FS: $content',
           );
           respond(id, {'stopReason': 'end_turn'});
           return;
@@ -220,10 +355,7 @@ Future<void> main(List<String> args) async {
       final id = message['id']?.toString();
       final completer = id == null ? null : pendingClientResponses.remove(id);
       if (completer != null && !completer.isCompleted) {
-        completer.complete(
-          (message['result'] as Map?)?.cast<String, dynamic>() ??
-              const <String, dynamic>{},
-        );
+        completer.complete(message);
       }
       continue;
     }
@@ -254,11 +386,33 @@ Future<void> main(List<String> args) async {
         break;
       case 'session/new':
         sessionCounter += 1;
-        respond(id, sessionInfo('mock-session-$sessionCounter'));
+        final newSessionId = 'mock-session-$sessionCounter';
+        respond(id, sessionInfo(newSessionId));
+        await sendUpdate(newSessionId, {
+          'sessionUpdate': 'available_commands_update',
+          'availableCommands': [
+            {'name': 'reset', 'description': '清空上下文（模拟）'},
+            {'name': 'plan', 'description': '请求代理制定计划'},
+          ],
+        });
         break;
       case 'session/resume':
       case 'session/load':
         respond(id, sessionInfo(params['sessionId'] as String? ?? ''));
+        break;
+      case 'session/set_config_option':
+        final configSession = params['sessionId'] as String? ?? '';
+        final configId = params['configId'] as String? ?? '';
+        if (configId.isNotEmpty) {
+          configFor(configSession)[configId] = '${params['value']}';
+        }
+        respond(id, {'configOptions': configOptionsFor(configSession)});
+        break;
+      case 'session/set_mode':
+        final modeSession = params['sessionId'] as String? ?? '';
+        final modeId = params['modeId'] as String? ?? '';
+        if (modeId.isNotEmpty) configFor(modeSession)['mode'] = modeId;
+        respond(id, <String, Object?>{});
         break;
       case 'session/prompt':
         final sessionId = params['sessionId'] as String? ?? '';
