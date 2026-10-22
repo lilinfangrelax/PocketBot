@@ -8,8 +8,10 @@ import 'package:provider/provider.dart';
 import 'package:pocket_bot/config/session_storage.dart';
 import 'package:pocket_bot/config/user_config.dart';
 import 'package:pocket_bot/main.dart';
+import 'package:pocket_bot/screens/debug_log_screen.dart';
 import 'package:pocket_bot/screens/mcp_servers_screen.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
+import 'package:pocket_bot/utils/debug_log.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/utils/version_utils.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
@@ -372,25 +374,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Card(
             child: Column(
               children: [
-                ListTile(
-                  leading: const Icon(Icons.bug_report),
-                  title: const Text('调试模式'),
-                  subtitle: const Text('输出详细日志'),
-                  trailing: fluent.ToggleSwitch(
-                    checked: false,
-                    onChanged: (value) {
-                      // TODO: Toggle debug mode
-                    },
+                ListenableBuilder(
+                  listenable: DebugLog.instance,
+                  builder: (context, _) => ListTile(
+                    leading: const Icon(Icons.bug_report),
+                    title: const Text('调试模式'),
+                    subtitle: const Text('记录连接、SSH 和 ACP 消息等详细日志（密码和密钥会被隐藏）'),
+                    trailing: fluent.ToggleSwitch(
+                      checked: DebugLog.instance.enabled,
+                      onChanged: DebugLog.instance.setEnabled,
+                    ),
                   ),
                 ),
                 const Divider(indent: 54),
                 ListTile(
                   leading: const Icon(Icons.terminal),
                   title: const Text('查看日志'),
+                  subtitle: const Text('遇到问题时可复制或导出日志反馈'),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    // TODO: View logs
-                  },
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const DebugLogScreen()),
+                  ),
                 ),
               ],
             ),

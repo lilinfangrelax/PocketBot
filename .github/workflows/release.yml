@@ -149,33 +149,26 @@ jobs:
       - name: Build Windows
         run: flutter build windows --release
 
-      - name: Create ZIP package
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          if ($LASTEXITCODE -eq 3010) { exit 0 }
+          exit $LASTEXITCODE
+
+      - name: Package Windows zip and installer
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
         shell: pwsh
-        run: |
-          $version = $env:VERSION
-          $zipName = "PocketBot-Windows-$version.zip"
+        run: .\windows\packaging\package.ps1 -Version $env:VERSION
 
-          mkdir build-output
-          Copy-Item "build\windows\x64\runner\Release\*" -Recurse -Destination build-output\
-          Set-Content -Path "build-output\version.txt" -Value $version
-
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zipPath = Join-Path (Get-Location) $zipName
-          if (Test-Path $zipPath) { Remove-Item $zipPath }
-          [System.IO.Compression.ZipFile]::CreateFromDirectory(
-            (Resolve-Path "build-output").Path,
-            $zipPath,
-            [System.IO.Compression.CompressionLevel]::Optimal,
-            $false
-          )
-
-      - name: Upload Windows ZIP
+      - name: Upload Windows packages
         uses: actions/upload-artifact@v4
         with:
-          name: windows-zip
-          path: PocketBot-Windows-${{ needs.prepare.outputs.version }}.zip
+          name: windows-packages
+          path: |
+            PocketBot-Windows-${{ needs.prepare.outputs.version }}.zip
+            PocketBot-Windows-${{ needs.prepare.outputs.version }}-Setup.exe
           if-no-files-found: error
 
   build-remote:

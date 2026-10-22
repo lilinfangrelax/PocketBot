@@ -92,6 +92,61 @@ void main() {
     );
   });
 
+  test('windows path search skips the extensionless npm shim', () {
+    final files = <String>{
+      r'C:\Users\me\AppData\Roaming\npm\npx',
+      r'C:\Users\me\AppData\Roaming\npm\npx.cmd',
+      r'C:\Users\me\AppData\Roaming\npm\npx.ps1',
+      r'C:\Program Files\nodejs\npx.cmd',
+      r'C:\Program Files\nodejs\node.exe',
+    };
+    final folded = files.map((path) => path.toLowerCase()).toSet();
+    bool exists(String path) => folded.contains(path.toLowerCase());
+    const env = {
+      'PATH': r'C:\Users\me\AppData\Roaming\npm;C:\Program Files\nodejs',
+      'PATHEXT': '.COM;.EXE;.BAT;.CMD',
+    };
+
+    expect(
+      resolveOnPath('npx', environment: env, windows: true, exists: exists),
+      r'C:\Users\me\AppData\Roaming\npm\npx.CMD',
+    );
+    expect(
+      resolveOnPath('node', environment: env, windows: true, exists: exists),
+      r'C:\Program Files\nodejs\node.EXE',
+    );
+    expect(
+      resolveOnPath(
+        'npx.cmd',
+        environment: env,
+        windows: true,
+        exists: exists,
+      ),
+      r'C:\Users\me\AppData\Roaming\npm\npx.cmd',
+    );
+
+    final scriptOnly = <String>{r'C:\npm\npx', r'C:\node\npx.cmd'};
+    expect(
+      resolveOnPath(
+        'npx',
+        environment: const {'PATH': r'C:\npm;C:\node'},
+        windows: true,
+        exists: (path) =>
+            scriptOnly.any((file) => file.toLowerCase() == path.toLowerCase()),
+      ),
+      r'C:\node\npx.CMD',
+    );
+    expect(
+      resolveOnPath(
+        'npx',
+        environment: const {'PATH': '/usr/local/bin:/usr/bin'},
+        windows: false,
+        exists: (path) => path == '/usr/local/bin/npx',
+      ),
+      '/usr/local/bin/npx',
+    );
+  });
+
   test('parseRunArgs keeps the agent command after --', () {
     final options = parseRunArgs(const [
       '--session',

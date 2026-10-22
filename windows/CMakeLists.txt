@@ -4,7 +4,7 @@ project(pocket_bot LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
-set(BINARY_NAME "pocket_bot")
+set(BINARY_NAME "PocketBot")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.

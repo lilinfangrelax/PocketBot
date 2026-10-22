@@ -9,6 +9,8 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:pocket_bot/config/update_config.dart';
 import 'package:pocket_bot/services/asset_download.dart';
 import 'package:pocket_bot/services/github_release_client.dart';
+import 'package:pocket_bot/services/update_proxy.dart';
+import 'package:pocket_bot/services/update_transport.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/utils/version_utils.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -30,10 +32,12 @@ class GithubUpdateService {
           currentVersion: currentVersion ?? (() => AppVersion.baseVersion),
           platform: platform ?? currentPlatform,
         ),
-        _dio = dio ?? Dio();
+        _dio = dio ?? createUpdateDio(),
+        _ownsDio = dio == null;
 
   final GithubReleaseClient _client;
   final Dio _dio;
+  final bool _ownsDio;
 
   static UpdatePlatform currentPlatform() {
     if (Platform.isAndroid) return UpdatePlatform.android;
@@ -41,7 +45,7 @@ class GithubUpdateService {
     return UpdatePlatform.other;
   }
 
-  Future<UpdateCheckResult?> checkForUpdates({
+  Future<UpdateCheckOutcome> checkForUpdates({
     UpdateChannel? channel,
   }) async {
     final selected = channel ?? UpdateConfig.channel;
@@ -49,16 +53,24 @@ class GithubUpdateService {
       final result = await _client.checkForUpdates(channel: selected);
       if (result == null) {
         Logger.info('[Update] No releases for channel ${selected.id}');
-        return null;
+        return UpdateCheckOutcome(
+          channel: selected,
+          failure: UpdateCheckFailure.emptyChannel,
+        );
       }
       Logger.info(
         '[Update] channel=${selected.id} current=${result.currentVersion} '
         'latest=${result.release.version} available=${result.updateAvailable}',
       );
-      return result;
+      return UpdateCheckOutcome(channel: selected, result: result);
     } catch (e) {
-      Logger.warning('[Update] Check failed: $e');
-      return null;
+      final detail = formatUpdateError(e, maxLength: 500);
+      Logger.warning('[Update] Check failed: $detail');
+      return UpdateCheckOutcome(
+        channel: selected,
+        failure: UpdateCheckFailure.request,
+        error: detail,
+      );
     }
   }
 
@@ -90,14 +102,17 @@ class GithubUpdateService {
       } catch (error) {
         lastError = error;
         Logger.warning(
-          '[Update] Download attempt ${attempt + 1} failed: $error',
+          '[Update] Download attempt ${attempt + 1} failed: '
+          '${formatUpdateError(error, maxLength: 500)}',
         );
         if (attempt < 5) {
           await Future<void>.delayed(Duration(seconds: attempt + 1));
         }
       }
     }
-    Logger.error('[Update] Download failed: $lastError');
+    Logger.error(
+      '[Update] Download failed: ${formatUpdateError(lastError, maxLength: 500)}',
+    );
     return null;
   }
 
@@ -140,8 +155,8 @@ class GithubUpdateService {
         responseType: ResponseType.stream,
         followRedirects: true,
         maxRedirects: 5,
-        connectTimeout: const Duration(seconds: 20),
-        receiveTimeout: const Duration(seconds: 40),
+        connectTimeout: const Duration(seconds: 30),
+        receiveTimeout: const Duration(seconds: 60),
         validateStatus: (code) => code == 200 || code == 206 || code == 416,
       ),
     );
@@ -159,7 +174,8 @@ class GithubUpdateService {
       throw StateError('Unexpected content range');
     }
 
-    final append = plan.offset > 0 && responseAppendsFromOffset(response.statusCode);
+    final append =
+        plan.offset > 0 && responseAppendsFromOffset(response.statusCode);
     final body = response.data;
     if (body == null) {
       throw StateError('Empty download response');
@@ -203,7 +219,8 @@ class GithubUpdateService {
           return false;
         }
         if (!await _hasZipHeader(file)) {
-          Logger.warning('[Update] Refusing to install a file that is not an APK');
+          Logger.warning(
+              '[Update] Refusing to install a file that is not an APK');
           return false;
         }
         try {
@@ -249,6 +266,9 @@ class GithubUpdateService {
 
   void close() {
     _client.close();
+    if (_ownsDio) {
+      _dio.close(force: true);
+    }
   }
 
   Future<Directory> _updateDirectory() async {
@@ -267,8 +287,8 @@ class GithubUpdateService {
 Future<bool> _hasZipHeader(File file) async {
   if (!await file.exists() || await file.length() < 4) return false;
   final header = await file.openRead(0, 4).fold<List<int>>(
-        <int>[],
-        (previous, chunk) => previous..addAll(chunk),
-      );
+    <int>[],
+    (previous, chunk) => previous..addAll(chunk),
+  );
   return looksLikeZipHeader(header);
 }

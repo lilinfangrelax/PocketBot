@@ -1,5 +1,6 @@
 import 'package:fluent_ui/fluent_ui.dart';
 import 'package:flutter/material.dart' as material;
+import 'package:pocket_bot/theme/pocket_fonts.dart';
 
 /// PocketBot colors.
 ///
@@ -123,8 +124,9 @@ FluentThemeData buildFluentTheme(Brightness brightness) {
   final isLight = brightness == Brightness.light;
   final accent =
       isLight ? const Color(0xFF007C67).toAccentColor() : Colors.teal;
-  return FluentThemeData(
+  final theme = FluentThemeData(
     brightness: brightness,
+    fontFamily: PocketFonts.ui,
     accentColor: accent,
     scaffoldBackgroundColor:
         isLight ? const Color(0xFFF3F3F3) : const Color(0xFF202020),
@@ -140,6 +142,9 @@ FluentThemeData buildFluentTheme(Brightness brightness) {
         padding: WidgetStatePropertyAll(EdgeInsetsDirectional.all(10)),
       ),
     ),
+  );
+  return theme.copyWith(
+    typography: PocketFonts.paintTypography(theme.typography),
   );
 }
 
@@ -187,6 +192,8 @@ material.ThemeData buildMaterialTheme(Brightness brightness) {
   final textTheme = baseText.apply(
     bodyColor: colors.textPrimary,
     displayColor: colors.textPrimary,
+    fontFamily: PocketFonts.ui,
+    fontFamilyFallback: PocketFonts.uiFallback,
   );
   final controlShape = material.RoundedRectangleBorder(
     borderRadius: material.BorderRadius.circular(FluentColors.radius),
@@ -203,6 +210,8 @@ material.ThemeData buildMaterialTheme(Brightness brightness) {
   return material.ThemeData(
     useMaterial3: true,
     brightness: brightness,
+    fontFamily: PocketFonts.ui,
+    fontFamilyFallback: PocketFonts.uiFallback,
     colorScheme: scheme,
     scaffoldBackgroundColor: colors.background,
     canvasColor: colors.background,

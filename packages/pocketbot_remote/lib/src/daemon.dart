@@ -82,10 +82,14 @@ class DaemonEndpoint {
       final port = json['port'];
       final token = json['token'];
       final version = json['version'];
-      if (pid is! int || port is! int || token is! String || version is! String) {
+      if (pid is! int ||
+          port is! int ||
+          token is! String ||
+          version is! String) {
         return null;
       }
-      return DaemonEndpoint(pid: pid, port: port, token: token, version: version);
+      return DaemonEndpoint(
+          pid: pid, port: port, token: token, version: version);
     } catch (_) {
       return null;
     }
@@ -371,27 +375,56 @@ class _AgentSession {
 }
 
 /// Locate `command` on PATH, including Windows PATHEXT.
-String resolveOnPath(String command) {
+///
+/// On Windows, an extensionless file is not a match. npm installs a Unix
+/// shell script named `npx` next to `npx.cmd`, and CreateProcess reports
+/// "%1 is not a valid Win32 application" if that script is started directly.
+String resolveOnPath(
+  String command, {
+  Map<String, String>? environment,
+  bool? windows,
+  bool Function(String path)? exists,
+}) {
+  final env = environment ?? Platform.environment;
+  final isWindows = windows ?? Platform.isWindows;
+  final fileExists = exists ?? ((String path) => File(path).existsSync());
   if (command.contains('/') || command.contains('\\')) return command;
-  final direct = File(command);
-  if (direct.isAbsolute && direct.existsSync()) return command;
-  final path = Platform.environment['PATH'] ?? '';
+  if (_isAbsoluteCommand(command, isWindows) && fileExists(command)) {
+    return command;
+  }
+  final path = env['PATH'] ?? '';
   if (path.isEmpty) return command;
-  final separator = Platform.isWindows ? ';' : ':';
-  final extensions = Platform.isWindows
-      ? (Platform.environment['PATHEXT'] ?? '.COM;.EXE;.BAT;.CMD').split(';')
-      : const <String>[''];
+  final separator = isWindows ? ';' : ':';
+  final dirSeparator = isWindows ? r'\' : '/';
+  final hasExtension = isWindows && command.contains('.');
+  final extensions = isWindows
+      ? (env['PATHEXT'] ?? '.COM;.EXE;.BAT;.CMD')
+          .split(';')
+          .map((ext) => ext.trim())
+          .where((ext) => ext.isNotEmpty)
+          .map((ext) => ext.startsWith('.') ? ext : '.$ext')
+          .toList()
+      : const <String>[];
   for (final dir in path.split(separator)) {
     if (dir.isEmpty) continue;
-    final plain = File('$dir${Platform.pathSeparator}$command');
-    if (plain.existsSync()) return plain.path;
+    if (!isWindows || hasExtension) {
+      final plain = '$dir$dirSeparator$command';
+      if (fileExists(plain)) return plain;
+      continue;
+    }
     for (final ext in extensions) {
-      if (ext.isEmpty) continue;
-      final candidate = File('$dir${Platform.pathSeparator}$command$ext');
-      if (candidate.existsSync()) return candidate.path;
+      final candidate = '$dir$dirSeparator$command$ext';
+      if (fileExists(candidate)) return candidate;
     }
   }
   return command;
+}
+
+bool _isAbsoluteCommand(String command, bool windows) {
+  if (windows) {
+    return RegExp(r'^[a-zA-Z]:').hasMatch(command) || command.startsWith(r'\');
+  }
+  return command.startsWith('/');
 }
 
 Future<ManagedAgent> spawnSystemAgent(AgentLaunch launch) async {

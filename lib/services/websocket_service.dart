@@ -14,6 +14,7 @@ import 'package:pocket_bot/services/acp_transport.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
 import 'package:pocket_bot/services/notification_service.dart';
 import 'package:pocket_bot/utils/acp_stream_text.dart';
+import 'package:pocket_bot/utils/debug_log.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -234,6 +235,10 @@ class WebSocketService with ChangeNotifier {
       : _connectionFactory = connectionFactory;
 
   final WebSocketChannel Function(Uri)? _connectionFactory;
+
+  /// Opens the pipe for [connectTarget] and reconnects. Defaults to
+  /// [AcpTransportFactory.open], which logs in to SSH on its own.
+  Future<AcpTransport> Function(GatewayInfo target)? transportOpener;
   AcpTransport? _transport;
   StreamSubscription? _channelSubscription;
   ConnectionState _state = ConnectionState.disconnected;
@@ -241,6 +246,10 @@ class WebSocketService with ChangeNotifier {
   String? _currentAgentId;
   String? _activeSessionKey;
   String _workingDirectory = '/';
+
+  /// Folder each ACP session was opened in. One agent process can serve
+  /// several folders; sessions without an entry use [_workingDirectory].
+  final Map<String, String> _sessionCwd = {};
   Map<String, dynamic> _agentCapabilities = const {};
   Map<String, dynamic>? _agentInfo;
   String? _currentModeId;
@@ -395,9 +404,10 @@ class WebSocketService with ChangeNotifier {
         ? CursorAgent.resolveWorkingDirectory(target.workingDirectory)
         : (target.workingDirectory.trim().isEmpty
             ? '.'
-            : target.workingDirectory);
+            : opensshPathToWindows(target.workingDirectory.trim()));
+    final open = transportOpener ?? AcpTransportFactory.open;
     await _attachTransport(
-      await AcpTransportFactory.open(target),
+      await open(target),
       workingDirectory: cwd,
       resume: resume,
     );
@@ -564,8 +574,9 @@ class WebSocketService with ChangeNotifier {
     final highFrequency = method == 'session/update' &&
         _isStreamingUpdate(_asMap(message['params']));
     if (!highFrequency) {
-      Logger.debug(
-          '[ACP] Received method=$method id=${message['id']}');
+      if (Logger.isVerbose) {
+        Logger.debug('[ACP] <<< ${_frameForLog(jsonEncode(message))}');
+      }
       _eventController.add(message);
     }
 
@@ -966,7 +977,10 @@ class WebSocketService with ChangeNotifier {
       return;
     }
     try {
-      final path = fs.resolve(params['path'] as String? ?? '', _workingDirectory);
+      final path = fs.resolve(
+        params['path'] as String? ?? '',
+        workingDirectoryFor(params['sessionId'] as String?),
+      );
       var content = await fs.readText(path);
       final line = params['line'];
       final limit = params['limit'];
@@ -998,7 +1012,10 @@ class WebSocketService with ChangeNotifier {
       return;
     }
     try {
-      final path = fs.resolve(params['path'] as String? ?? '', _workingDirectory);
+      final path = fs.resolve(
+        params['path'] as String? ?? '',
+        workingDirectoryFor(params['sessionId'] as String?),
+      );
       await fs.writeText(path, params['content'] as String? ?? '');
       _sendJson({
         'jsonrpc': '2.0',
@@ -1035,8 +1052,13 @@ class WebSocketService with ChangeNotifier {
   }
 
   void _sendJson(Map<String, dynamic> value) {
-    _transport?.send(jsonEncode(value));
+    final frame = jsonEncode(value);
+    if (Logger.isVerbose) Logger.debug('[ACP] >>> ${_frameForLog(frame)}');
+    _transport?.send(frame);
   }
+
+  static String _frameForLog(String frame) =>
+      DebugLog.truncate(frame, 1500);
 
   void selectSession(String sessionKey, {String? agentId}) {
     activeSession?.deactivate();
@@ -1071,15 +1093,26 @@ class WebSocketService with ChangeNotifier {
     return session;
   }
 
-  Future<String> _createRemoteSession() async {
+  /// Folder [sessionKey] runs in: its own when it has one, otherwise the
+  /// folder the agent was started in.
+  String workingDirectoryFor(String? sessionKey) {
+    final cwd = sessionKey == null ? null : _sessionCwd[sessionKey];
+    return cwd == null || cwd.trim().isEmpty ? _workingDirectory : cwd;
+  }
+
+  Future<String> _createRemoteSession({String? cwd}) async {
+    final folder = cwd == null || cwd.trim().isEmpty
+        ? _workingDirectory
+        : opensshPathToWindows(cwd.trim());
     final result = await _request('session/new', {
-      'cwd': _workingDirectory,
+      'cwd': folder,
       'mcpServers': _mcpServersForAgent(),
     });
     final id = result['sessionId'] as String?;
     if (id == null || id.isEmpty) {
       throw Exception('ACP Agent returned no sessionId');
     }
+    _sessionCwd[id] = folder;
     _attachedSessions.add(id);
     _applySessionMeta(result);
     return id;
@@ -1252,9 +1285,10 @@ class WebSocketService with ChangeNotifier {
     await _ensureRemoteSession(selected);
   }
 
-  Future<ChatSession> createGatewaySession(String title) async {
+  /// Starts a background ACP session. [cwd] defaults to the agent's folder.
+  Future<ChatSession> createGatewaySession(String title, {String? cwd}) async {
     _requireConnected();
-    final id = await _createRemoteSession();
+    final id = await _createRemoteSession(cwd: cwd);
     final now = DateTime.now();
     final session = ChatSession(
       id: id,
@@ -1271,12 +1305,16 @@ class WebSocketService with ChangeNotifier {
     return session;
   }
 
-  Future<String> _ensureRemoteSession(String sessionKey) async {
+  Future<String> _ensureRemoteSession(String sessionKey, {String? cwd}) async {
+    if (cwd != null && cwd.trim().isNotEmpty) {
+      _sessionCwd[sessionKey] = opensshPathToWindows(cwd.trim());
+    }
     if (_attachedSessions.contains(sessionKey)) return sessionKey;
 
     if (sessionKey.startsWith('local-') ||
         sessionKey.startsWith('pocketbot-')) {
-      final remoteId = await _createRemoteSession();
+      final remoteId =
+          await _createRemoteSession(cwd: _sessionCwd.remove(sessionKey));
       final old = _sessions.remove(sessionKey);
       final replacement = SessionState(
         sessionKey: remoteId,
@@ -1301,14 +1339,14 @@ class WebSocketService with ChangeNotifier {
     if (sessionCaps.containsKey('resume')) {
       final result = await _request('session/resume', {
         'sessionId': sessionKey,
-        'cwd': _workingDirectory,
+        'cwd': workingDirectoryFor(sessionKey),
         'mcpServers': _mcpServersForAgent(),
       });
       _applySessionMeta(result);
     } else if (_agentCapabilities['loadSession'] == true) {
       final result = await _request('session/load', {
         'sessionId': sessionKey,
-        'cwd': _workingDirectory,
+        'cwd': workingDirectoryFor(sessionKey),
         'mcpServers': _mcpServersForAgent(),
       });
       _applySessionMeta(result);
@@ -1328,6 +1366,7 @@ class WebSocketService with ChangeNotifier {
     }
     _sessions.remove(sessionKey)?.disposeStreams();
     _attachedSessions.remove(sessionKey);
+    _sessionCwd.remove(sessionKey);
     if (_activeSessionKey == sessionKey) _activeSessionKey = null;
     await SessionStorage.deleteSession(sessionKey);
     notifyListeners();
@@ -1391,9 +1430,11 @@ class WebSocketService with ChangeNotifier {
 
   /// Attaches [sessionKey] to the agent (creating, resuming or loading it)
   /// and returns the ACP session id it now lives under.
-  Future<String> ensureRemoteSession(String sessionKey) {
+  /// [cwd] pins the folder used when the session has to be created, resumed
+  /// or loaded.
+  Future<String> ensureRemoteSession(String sessionKey, {String? cwd}) {
     _requireConnected();
-    return _ensureRemoteSession(sessionKey);
+    return _ensureRemoteSession(sessionKey, cwd: cwd);
   }
 
   /// Sends a prompt without touching the active session and resolves with

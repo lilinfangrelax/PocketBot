@@ -181,48 +181,10 @@ jobs:
         shell: pwsh
 
       - name: Create ZIP Package
-        run: |
-          $version = "${{ steps.version.outputs.version }}"
-          $zipName = "PocketBot-Windows-$version.zip"
-
-          mkdir build-output
-          Copy-Item "build\windows\x64\runner\Release\*" -Recurse -Destination build-output\
-
-          # 添加版本文件
-          Set-Content -Path "build-output\version.txt" -Value $version
-          Set-Content -Path "build-output\RELEASE_NOTES.txt" -Value "PocketBot Windows Release v$version"
-
-          # Do not use a PowerShell here-string here: its body must start at
-          # column 0, which breaks YAML `run: |` indentation.
-          $readme = @(
-            '# PocketBot Windows Release',
-            '',
-            '## Install',
-            '1. Extract the zip to any folder',
-            '2. Run PocketBot.exe',
-            '',
-            '## Version',
-            "- Version: $version",
-            '- Flutter Version: 3.38.8',
-            '',
-            '## Changelog',
-            'See GitHub Releases'
-          ) -join [Environment]::NewLine
-          Set-Content -Path "build-output\README.txt" -Value $readme -Encoding utf8
-
-          # ZipFile::CreateFromDirectory produces Explorer-compatible entries
-          # (no "./" prefix). `tar -a -C dir .` stores ./file names that
-          # Windows Explorer cannot open.
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zipPath = Join-Path (Get-Location) $zipName
-          if (Test-Path $zipPath) { Remove-Item $zipPath }
-          [System.IO.Compression.ZipFile]::CreateFromDirectory(
-            (Resolve-Path "build-output").Path,
-            $zipPath,
-            [System.IO.Compression.CompressionLevel]::Optimal,
-            $false
-          )
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         shell: pwsh
+        run: .\windows\packaging\package.ps1 -Version $env:VERSION
 
       - name: Upload Windows ZIP
         uses: actions/upload-artifact@v4

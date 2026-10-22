@@ -105,6 +105,26 @@ void main() {
         release.assetFor(UpdatePlatform.windows)?.name,
         'PocketBot-Windows-1.2.0.zip',
       );
+    });
+
+    test('windows update keeps the zip when a setup exe is also published', () {
+      final release = GithubRelease.fromJson(_release(
+        tag: 'v1.2.18-beta',
+        prerelease: true,
+        assets: [
+          _zip('1.2.18-beta'),
+          {
+            'name': 'PocketBot-Windows-1.2.18-beta-Setup.exe',
+            'browser_download_url':
+                'https://example.com/PocketBot-Windows-1.2.18-beta-Setup.exe',
+            'size': 1024,
+          },
+        ],
+      ));
+      expect(
+        release.assetFor(UpdatePlatform.windows)?.name,
+        'PocketBot-Windows-1.2.18-beta.zip',
+      );
       expect(release.assetFor(UpdatePlatform.other), isNull);
     });
   });

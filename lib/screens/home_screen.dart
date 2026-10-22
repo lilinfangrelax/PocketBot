@@ -14,10 +14,12 @@ import 'package:pocket_bot/services/acp_registry.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
 import 'package:pocket_bot/services/ssh_host_keys.dart';
+import 'package:pocket_bot/services/ssh_host_pool.dart';
 import 'package:pocket_bot/services/ssh_remote_session.dart';
 import 'package:pocket_bot/services/websocket_service.dart' as ws;
 import 'package:pocket_bot/theme/fluent_theme.dart';
 import 'package:pocket_bot/widgets/fluent_page.dart';
+import 'package:pocket_bot/widgets/workspace_picker.dart';
 
 typedef ConnectionState = ws.ConnectionState;
 
@@ -210,7 +212,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         const SizedBox(height: 16),
-        _buildGatewayList(manager),
+        _buildGatewayList(),
       ],
     );
   }
@@ -228,7 +230,7 @@ class _HomeScreenState extends State<HomeScreen> {
           showProgress: true,
         ),
         const SizedBox(height: 16),
-        _buildGatewayList(manager),
+        _buildGatewayList(),
       ],
     );
   }
@@ -268,11 +270,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         const SizedBox(height: 16),
+        _buildGatewayList(),
         _buildAgentPicker(),
         const SizedBox(height: 16),
         _buildLaunchLocal(manager),
         const SizedBox(height: 16),
-        _buildGatewayList(manager),
         _buildSshConnection(manager),
       ],
     );
@@ -289,11 +291,11 @@ class _HomeScreenState extends State<HomeScreen> {
           subText: '从 ACP Registry 选择代理，本机或 SSH 启动',
         ),
         const SizedBox(height: 16),
+        _buildGatewayList(),
         _buildAgentPicker(),
         const SizedBox(height: 16),
         _buildLaunchLocal(manager),
         const SizedBox(height: 16),
-        _buildGatewayList(manager),
         _buildSshConnection(manager),
       ],
     );
@@ -486,7 +488,15 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildGatewayList(ConnectionManager manager) {
+  /// Watches the manager itself: the page body only rebuilds on connection
+  /// state, but saved hosts and their online status change independently.
+  Widget _buildGatewayList() {
+    return Consumer<ConnectionManager>(
+      builder: (context, manager, _) => _buildGatewayColumn(manager),
+    );
+  }
+
+  Widget _buildGatewayColumn(ConnectionManager manager) {
     final saved = manager.savedGateways;
     final allGateways = <GatewayInfo>[];
 
@@ -508,19 +518,17 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const FluentSectionHeader('已保存的连接'),
+        FluentSectionHeader(_gatewayListTitle(manager, allGateways)),
         ...allGateways.map((gw) {
           final isConnected = manager.gateway != null &&
               manager.gateway!.connectionId == gw.connectionId;
-          final status = manager.getGatewayStatus(gw);
-          final isOnline = status?.isOnline ?? false;
-
           return _GatewayListTile(
             gateway: gw,
             isConnected: isConnected,
-            isOnline: isOnline,
+            hostState: manager.hostState(gw),
             isConnecting: manager.state == ConnectionState.connecting &&
                 manager.gateway?.connectionId == gw.connectionId,
+            onLogin: () => _loginHost(manager, gw),
             onConnect: () {
               if (gw.kind == AgentTransportKind.ssh) {
                 _startSshFlow(manager, existing: gw);
@@ -535,6 +543,23 @@ class _HomeScreenState extends State<HomeScreen> {
         const SizedBox(height: 8),
       ],
     );
+  }
+
+  String _gatewayListTitle(
+    ConnectionManager manager,
+    List<GatewayInfo> gateways,
+  ) {
+    final ssh = gateways
+        .where((gw) => gw.kind == AgentTransportKind.ssh)
+        .map((gw) => gw.hostId)
+        .toSet();
+    if (ssh.isEmpty) return '已保存的连接';
+    final online = gateways
+        .where((gw) =>
+            gw.kind == AgentTransportKind.ssh && manager.hostState(gw).isOnline)
+        .map((gw) => gw.hostId)
+        .toSet();
+    return '已保存的连接 · SSH 在线 ${online.length}/${ssh.length}';
   }
 
   Widget _buildSshConnection(ConnectionManager manager) {
@@ -648,9 +673,9 @@ class _HomeScreenState extends State<HomeScreen> {
               width: double.infinity,
               child: fluent.FilledButton(
                 onPressed: _manualHost.isNotEmpty && _manualUsername.isNotEmpty
-                    ? () => _startSshFlow(manager)
+                    ? () => _loginHost(manager, _buildSshTarget())
                     : null,
-                child: const Text('登录并选择目录'),
+                child: const Text('保存并登录'),
               ),
             ),
           ],
@@ -686,7 +711,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     SshRemoteSession? session;
     try {
-      session = await SshRemoteSession.connect(target);
+      session = await manager.browseHost(target);
       if (!mounted) {
         await session.close();
         return;
@@ -704,19 +729,39 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       );
-      if (cwd == null || cwd.trim().isEmpty) {
-        await session.close();
-        return;
-      }
+      await session.close();
+      if (cwd == null || cwd.trim().isEmpty) return;
 
-      final updated = target.copyWith(workingDirectory: cwd);
-      await manager.connectWithSshSession(updated, session);
+      await manager.connectTo(target.copyWith(workingDirectory: cwd));
     } catch (error) {
       await session?.close();
       if (!mounted) return;
       if (loadingShown) Navigator.pop(context);
       showAppNotice(context, _simplifyError(error.toString()));
     }
+  }
+
+  /// Saves [target] and logs in. Picking a folder and starting an agent are
+  /// separate steps.
+  Future<void> _loginHost(ConnectionManager manager, GatewayInfo target) async {
+    if (target.kind != AgentTransportKind.ssh) {
+      await manager.checkGatewaysStatus();
+      return;
+    }
+    if (target.requiresAuth) {
+      showAppNotice(context, '请填写 SSH 密码或私钥');
+      return;
+    }
+    await manager.addSavedGateway(target);
+    final online = await manager.hosts.check(target);
+    if (!mounted) return;
+    final state = manager.hostState(target);
+    showAppNotice(
+      context,
+      online
+          ? '${target.hostLabel} 已在线'
+          : _simplifyError(state.error ?? '无法登录 ${target.hostLabel}'),
+    );
   }
 
   GatewayInfo _buildSshTarget() {
@@ -901,15 +946,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   ? () {
                       final manager = context.read<ConnectionManager>();
                       final gateway = _buildSshTarget();
-                      if (isEditing) {
-                        manager.removeSavedGateway(existingGateway);
-                      }
-                      manager.addSavedGateway(gateway);
                       Navigator.pop(context);
-                      _startSshFlow(manager, existing: gateway);
+                      () async {
+                        if (isEditing) {
+                          await manager.removeSavedGateway(existingGateway);
+                        }
+                        if (!mounted) return;
+                        await _loginHost(manager, gateway);
+                      }();
                     }
                   : null,
-              child: Text(isEditing ? '保存并选择目录' : '添加并选择目录'),
+              child: Text(isEditing ? '保存并登录' : '添加并登录'),
             ),
           ],
         );
@@ -921,8 +968,9 @@ class _HomeScreenState extends State<HomeScreen> {
 class _GatewayListTile extends StatelessWidget {
   final GatewayInfo gateway;
   final bool isConnected;
-  final bool isOnline;
+  final HostState hostState;
   final bool isConnecting;
+  final VoidCallback onLogin;
   final VoidCallback onConnect;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -930,12 +978,16 @@ class _GatewayListTile extends StatelessWidget {
   const _GatewayListTile({
     required this.gateway,
     required this.isConnected,
-    required this.isOnline,
+    required this.hostState,
     required this.isConnecting,
+    required this.onLogin,
     required this.onConnect,
     required this.onEdit,
     required this.onDelete,
   });
+
+  bool get _needsLogin =>
+      gateway.kind == AgentTransportKind.ssh && !hostState.isOnline;
 
   @override
   Widget build(BuildContext context) {
@@ -949,16 +1001,7 @@ class _GatewayListTile extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(
             children: [
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  color: isConnected
-                      ? colors.success
-                      : (isOnline ? colors.info : colors.textTertiary),
-                  shape: BoxShape.circle,
-                ),
-              ),
+              HostStatusDot(state: hostState),
               const SizedBox(width: 12),
               Container(
                 padding: const EdgeInsets.all(8),
@@ -989,6 +1032,16 @@ class _GatewayListTile extends StatelessWidget {
                             color: colors.textSecondary,
                           ),
                     ),
+                    Text(
+                      hostStatusText(hostState),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: hostState.status == HostStatus.offline
+                                ? colors.danger
+                                : colors.textSecondary,
+                          ),
+                    ),
                   ],
                 ),
               ),
@@ -1012,10 +1065,18 @@ class _GatewayListTile extends StatelessWidget {
                   child: fluent.ProgressRing(strokeWidth: 2),
                 ),
               const SizedBox(width: 8),
-              if (!isConnected && !isConnecting)
+              if (!isConnected && !isConnecting && _needsLogin)
+                TextButton(
+                  onPressed:
+                      hostState.status == HostStatus.checking ? null : onLogin,
+                  child: const Text('登录'),
+                )
+              else if (!isConnected && !isConnecting)
                 TextButton(
                   onPressed: onConnect,
-                  child: const Text('连接'),
+                  child: Text(
+                    gateway.kind == AgentTransportKind.ssh ? '选目录启动' : '启动',
+                  ),
                 ),
               IconButton(
                 icon: const Icon(Icons.delete_outline, size: 20),

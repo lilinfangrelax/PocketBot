@@ -1,4 +1,5 @@
 import 'package:pocket_bot/config/update_channel.dart';
+import 'package:pocket_bot/utils/version_utils.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 export 'package:pocket_bot/config/update_channel.dart';
@@ -17,7 +18,10 @@ class UpdateConfig {
 
   static Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
-    _channel = UpdateChannel.fromId(prefs.getString(_channelKey));
+    _channel = resolveUpdateChannel(
+      savedId: prefs.getString(_channelKey),
+      currentVersion: AppVersion.baseVersion,
+    );
   }
 
   static Future<void> setChannel(UpdateChannel channel) async {
