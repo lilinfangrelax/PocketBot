@@ -209,6 +209,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final themeProvider = context.watch<ThemeProvider>();
     final currentMode = themeProvider.themeMode;
+    final wsService = context.watch<ConnectionManager>().wsService;
 
     return FluentScreen(
       title: const Text('设置'),
@@ -329,6 +330,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       builder: (_) => const McpServersScreen(),
                     ),
                   ),
+                ),
+                const Divider(),
+                ListTile(
+                  key: const ValueKey('agent-logout'),
+                  leading: const Icon(Icons.logout),
+                  title: const Text('退出 Agent 登录'),
+                  subtitle: Text(
+                    wsService.isConnected
+                        ? '清除当前 Agent 的登录凭据'
+                        : '连接 Agent 后可用',
+                  ),
+                  enabled: wsService.isConnected,
+                  onTap: wsService.isConnected ? _logoutAgent : null,
                 ),
               ],
             ),
@@ -491,6 +505,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _logoutAgent() async {
+    final confirmed = await fluent.showDialog<bool>(
+      context: context,
+      builder: (context) => fluent.ContentDialog(
+        title: const Text('退出 Agent 登录？'),
+        content: const Text(
+          '将通知当前 Agent 清除登录凭据。重新连接时，PocketBot 会再次尝试登录。',
+        ),
+        actions: [
+          fluent.Button(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          fluent.FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('退出登录'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final wsService = context.read<ConnectionManager>().wsService;
+    try {
+      await wsService.logoutAgent();
+      if (mounted) _showSnackBar(context, '已退出 Agent 登录');
+    } catch (error) {
+      if (!mounted) return;
+      final message = error.toString().contains('-32601')
+          ? '当前 Agent 不支持退出登录'
+          : '退出登录失败：$error';
+      _showSnackBar(context, message);
+    }
   }
 
   void _showSnackBar(BuildContext context, String message) {

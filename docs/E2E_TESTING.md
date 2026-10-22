@@ -17,6 +17,10 @@ Feature 位于 `features/zh-CN/`，步骤文本不包含选择器。
 | 生成控制与异常恢复 | `@integration` | `generation_control_test.dart` | 停止生成、断线发送失败保留输入、重连重发 |
 | 会话历史与多会话 | `@integration` | `session_history_test.dart` | 重启恢复历史、多会话切换互不串消息、删除会话同步移除存储 |
 | 工具调用与权限确认 | `@integration` | `tool_permission_test.dart` | 允许一次后工具完成、拒绝后工具失败并继续回复 |
+| 聊天图片附件 | `@integration` | `chat_attachment_test.dart` | 选择图片、仅附件发送、ACP `image` 内容块与缩略图 |
+| Agent 登录退出 | `@integration` | `agent_logout_test.dart` | 设置页退出 Agent 登录并提示成功 |
+| ACP elicitation | `@integration` | `elicitation_test.dart` | 填写表单并按类型回传、URL 授权后打开链接、完成通知 |
+| 客户端 terminal | `@integration` | `terminal_test.dart` | 代理发起 terminal/create 执行命令、等待退出、读取输出并释放 |
 | 群聊@路由 | `@integration` | `group_at_routing_test.dart` | 真实群聊界面中被 @ 的联系人回复、未 @ 时不触发、多代理分别回复、失效连接仅提示失败 |
 | ACP能力与计划 | `@integration` | `acp_capabilities_test.dart` | 代理配置选项（模型/模式）展示与切换、计划面板展开、`cursor/update_todos` 待办、`available_commands_update` 斜杠命令、代理 fs 读写 |
 | 通讯录与AI联系人 | `@integration` | `ai_contact_test.dart` | AI 联系人创建与代理绑定、从通讯录打开聊天 |
@@ -61,7 +65,7 @@ flutter test integration_test/manual/real_ssh_test.dart -d windows
 
 ### Mock ACP 代理
 
-`tool/mock_acp_agent.dart` 通过 stdin/stdout 收发 NDJSON JSON-RPC，实现 `initialize`、`session/new`、`session/resume`、`session/load`、`session/prompt`、`session/cancel`。默认将 `MOCK_AGENT_OK: <提示文本>` 拆成三块推送后返回 `stopReason: end_turn`，并可用特殊提示触发确定行为：
+`tool/mock_acp_agent.dart` 通过 stdin/stdout 收发 NDJSON JSON-RPC，实现 `initialize`、`session/new`、`session/resume`、`session/load`、`session/prompt`、`session/cancel`、`logout`，并可反向调用 `elicitation/create` 与 `terminal/*`。默认将 `MOCK_AGENT_OK: <提示文本>` 拆成三块推送后返回 `stopReason: end_turn`，并可用特殊提示触发确定行为：
 
 | 提示文本 | 行为 |
 | --- | --- |
@@ -71,6 +75,9 @@ flutter test integration_test/manual/real_ssh_test.dart -d windows
 | `e2e-plan` | 推送三步计划（1 完成、1 进行中、1 待办）后回复 `MOCK_PLAN_OK`，用于验收计划面板 |
 | `e2e-todos` | 发送 `cursor/update_todos` 通知（1 完成、1 进行中）后回复 `MOCK_TODOS_OK`，用于验收待办横幅 |
 | `e2e-fs` | 通过 `fs/write_text_file` 写入 `pocketbot-e2e-fs.txt`、读回并删除后回复 `MOCK_FS: E2E_FS_OK`，用于验收客户端文件系统能力 |
+| `e2e-elicit-form` | 发起 form 模式 `elicitation/create`（字符串/整数/布尔/oneOf 字段），按提交内容回复 `MOCK_ELICIT: <action> <content>` |
+| `e2e-elicit-url` | 发起 url 模式 `elicitation/create`，接受后发送 `elicitation/complete` 并回复 `MOCK_ELICIT_URL: <action>` |
+| `e2e-terminal` | 调用 `terminal/create` 执行 `echo terminal-e2e`，`wait_for_exit` 后读 `terminal/output`、`terminal/release`，回复 `MOCK_TERMINAL: exit=… output=… released=…` |
 | `e2e-tool` | 发出 `pending` 工具调用「运行 E2E 命令」并请求 `session/request_permission`；选择 `allow_once` 时工具变为 `completed` 并回复 `MOCK_TOOL_ALLOWED`，选择 `reject_once` 时变为 `failed` 并回复 `MOCK_TOOL_DENIED` |
 
 `session/new` 还会下发 `configOptions`（`model`: Mock Fast / Mock Smart，`mode`: Agent / Plan）与 `available_commands_update`（`/reset`、`/plan`）；`session/set_config_option`、`session/set_mode` 会更新会话状态并返回最新选项。

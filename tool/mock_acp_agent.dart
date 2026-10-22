@@ -31,8 +31,7 @@ Future<void> main(List<String> args) async {
     });
   }
 
-  Map<String, String> configFor(String sessionId) =>
-      sessionConfigs.putIfAbsent(
+  Map<String, String> configFor(String sessionId) => sessionConfigs.putIfAbsent(
         sessionId,
         () => {'model': 'mock-fast', 'mode': 'agent'},
       );
@@ -186,6 +185,83 @@ Future<void> main(List<String> args) async {
           await sendChunk(sessionId, messageId, 'MOCK_SLOW:2');
           respond(id, {'stopReason': 'end_turn'});
           return;
+        case 'e2e-elicit-form':
+          final form = await callClient('elicitation/create', {
+            'sessionId': sessionId,
+            'mode': 'form',
+            'message': '请填写 E2E 表单',
+            'requestedSchema': {
+              'type': 'object',
+              'properties': {
+                'name': {
+                  'type': 'string',
+                  'title': '名称',
+                  'minLength': 1,
+                },
+                'port': {
+                  'type': 'integer',
+                  'title': '端口',
+                  'minimum': 1024,
+                  'maximum': 65535,
+                  'default': 3000,
+                },
+                'enabled': {
+                  'type': 'boolean',
+                  'title': '启用',
+                  'default': true,
+                },
+                'strategy': {
+                  'type': 'string',
+                  'title': '策略',
+                  'oneOf': [
+                    {'const': 'conservative', 'title': 'Conservative'},
+                    {'const': 'balanced', 'title': 'Balanced'},
+                  ],
+                  'default': 'balanced',
+                },
+              },
+              'required': ['name'],
+            },
+          });
+          final formResult =
+              (form['result'] as Map?)?.cast<String, dynamic>() ??
+                  const <String, dynamic>{};
+          final content =
+              (formResult['content'] as Map?) ?? const <String, dynamic>{};
+          await sendChunk(
+            sessionId,
+            messageId,
+            'MOCK_ELICIT: ${formResult['action']} '
+            '${content['name']}|${content['port']}|'
+            '${content['enabled']}|${content['strategy']}',
+          );
+          respond(id, {'stopReason': 'end_turn'});
+          return;
+        case 'e2e-elicit-url':
+          final urlReply = await callClient('elicitation/create', {
+            'mode': 'url',
+            'elicitationId': 'mock-url-1',
+            'url': 'https://example.com/authorize',
+            'message': '请授权示例服务',
+          });
+          final urlResult =
+              (urlReply['result'] as Map?)?.cast<String, dynamic>() ??
+                  const <String, dynamic>{};
+          if (urlResult['action'] == 'accept') {
+            send({
+              'jsonrpc': '2.0',
+              'method': 'elicitation/complete',
+              'params': {'elicitationId': 'mock-url-1'},
+            });
+            await stdout.flush();
+          }
+          await sendChunk(
+            sessionId,
+            messageId,
+            'MOCK_ELICIT_URL: ${urlResult['action']}',
+          );
+          respond(id, {'stopReason': 'end_turn'});
+          return;
         case 'e2e-markdown':
           await sendChunk(
             sessionId,
@@ -275,6 +351,49 @@ Future<void> main(List<String> args) async {
           );
           respond(id, {'stopReason': 'end_turn'});
           return;
+        case 'e2e-terminal':
+          final created = await callClient('terminal/create', {
+            'sessionId': sessionId,
+            'command': Platform.isWindows ? 'cmd' : 'sh',
+            'args': Platform.isWindows
+                ? ['/d', '/c', 'echo terminal-e2e']
+                : ['-c', 'echo terminal-e2e'],
+            'outputByteLimit': 1024,
+          });
+          final terminalId =
+              ((created['result'] as Map?)?['terminalId'])?.toString();
+          if (terminalId == null) {
+            await sendChunk(
+              sessionId,
+              messageId,
+              'MOCK_TERMINAL_ERROR: ${created['error']}',
+            );
+            respond(id, {'stopReason': 'end_turn'});
+            return;
+          }
+          final exit = await callClient('terminal/wait_for_exit', {
+            'sessionId': sessionId,
+            'terminalId': terminalId,
+          });
+          final output = await callClient('terminal/output', {
+            'sessionId': sessionId,
+            'terminalId': terminalId,
+          });
+          final released = await callClient('terminal/release', {
+            'sessionId': sessionId,
+            'terminalId': terminalId,
+          });
+          final exitStatus = (exit['result'] as Map?) ?? const {};
+          final outputResult = (output['result'] as Map?) ?? const {};
+          await sendChunk(
+            sessionId,
+            messageId,
+            'MOCK_TERMINAL: exit=${exitStatus['exitCode']} '
+            'output=${'${outputResult['output']}'.trim()} '
+            'released=${released['error'] == null}',
+          );
+          respond(id, {'stopReason': 'end_turn'});
+          return;
         case 'e2e-tool':
           final toolCallId = 'mock-tool-$messageCounter';
           await sendUpdate(sessionId, {
@@ -290,8 +409,9 @@ Future<void> main(List<String> args) async {
             respond(id, {'stopReason': 'cancelled'});
             return;
           }
-          final outcome = (result['outcome'] as Map?)?.cast<String, dynamic>() ??
-              const <String, dynamic>{};
+          final outcome =
+              (result['outcome'] as Map?)?.cast<String, dynamic>() ??
+                  const <String, dynamic>{};
           final optionId = outcome['optionId'] as String?;
           final allowed = optionId == 'allow_once';
           await sendUpdate(sessionId, {
@@ -371,7 +491,7 @@ Future<void> main(List<String> args) async {
             'loadSession': false,
             'sessionCapabilities': {'resume': <String, Object?>{}},
             'promptCapabilities': {
-              'image': false,
+              'image': true,
               'audio': false,
               'embeddedContext': false,
             },
@@ -417,11 +537,18 @@ Future<void> main(List<String> args) async {
       case 'session/prompt':
         final sessionId = params['sessionId'] as String? ?? '';
         final blocks = params['prompt'] as List? ?? const [];
-        final promptText = blocks
-            .whereType<Map>()
-            .where((block) => block['type'] == 'text')
-            .map((block) => '${block['text'] ?? ''}')
-            .join('\n');
+        final imageCount = blocks.whereType<Map>().where((block) {
+          return block['type'] == 'image' &&
+              block['mimeType'] is String &&
+              (block['data'] as String?)?.isNotEmpty == true;
+        }).length;
+        final promptText = [
+          ...blocks
+              .whereType<Map>()
+              .where((block) => block['type'] == 'text')
+              .map((block) => '${block['text'] ?? ''}'),
+          if (imageCount > 0) 'MOCK_IMAGES: $imageCount',
+        ].join('\n');
         final active = _ActivePrompt(sessionId);
         activePrompts[sessionId] = active;
         unawaited(handlePrompt(id, sessionId, promptText, active));
@@ -429,6 +556,9 @@ Future<void> main(List<String> args) async {
       case 'session/cancel':
         final sessionId = params['sessionId'] as String?;
         if (sessionId != null) activePrompts[sessionId]?.cancel();
+        break;
+      case 'logout':
+        respond(id, <String, Object?>{});
         break;
       default:
         if (id != null) {

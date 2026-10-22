@@ -130,6 +130,11 @@ class _ToolCallCardState extends State<ToolCallCard> {
       }
       if (call.output.isNotEmpty) {
         children.add(_MonoBlock(text: call.output.join('\n'), copyable: true));
+      } else {
+        final rawOutput = call.rawOutputText;
+        if (rawOutput != null) {
+          children.add(_MonoBlock(text: rawOutput, copyable: true));
+        }
       }
       if (call.terminalIds.isNotEmpty && call.output.isEmpty) {
         children.add(Text(

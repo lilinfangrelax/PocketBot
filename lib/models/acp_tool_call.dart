@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 /// File change reported in an ACP tool call (`{"type": "diff"}` content).
 class AcpDiff {
   final String path;
@@ -60,12 +62,27 @@ class AcpToolCall {
     return null;
   }
 
+  /// `rawOutput` as displayable text; agents send either a string or JSON.
+  String? get rawOutputText {
+    final value = rawOutput;
+    if (value == null) return null;
+    if (value is String) {
+      final text = value.trim();
+      return text.isEmpty ? null : text;
+    }
+    final text = value is Map || value is List
+        ? const JsonEncoder.withIndent('  ').convert(value)
+        : value.toString().trim();
+    return text.isEmpty ? null : text;
+  }
+
   bool get hasDetails =>
       command != null ||
       output.isNotEmpty ||
       diffs.isNotEmpty ||
       terminalIds.isNotEmpty ||
-      locations.isNotEmpty;
+      locations.isNotEmpty ||
+      rawOutputText != null;
 
   /// Applies an ACP tool call update. Per the protocol, `content` and
   /// `locations` replace the previous lists when present.

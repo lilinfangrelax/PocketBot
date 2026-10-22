@@ -8,13 +8,16 @@ import 'package:pocket_bot/widgets/tool_call_card.dart';
 import 'package:pocket_bot/config/session_storage.dart';
 import 'package:pocket_bot/config/user_config.dart';
 import 'package:pocket_bot/main.dart';
+import 'package:pocket_bot/models/attachment.dart';
 import 'package:pocket_bot/models/message.dart';
+import 'package:pocket_bot/services/attachment_service.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/services/websocket_service.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
 import 'package:pocket_bot/widgets/fluent_page.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/widgets/attachment_widget.dart';
+import 'package:pocket_bot/widgets/elicitation_dialog.dart';
 import 'package:pocket_bot/widgets/markdown_message_widget.dart';
 
 /// Keyboard intents for chat input
@@ -89,6 +92,8 @@ class _ChatScreenState extends State<ChatScreen> {
   List<Message> _messages = [];
   bool _isTyping = false;
   bool _isGenerating = false; // AI 正在生成回复的状态
+  final List<Attachment> _pendingAttachments = [];
+  bool _isPickingAttachment = false;
   final List<_MessageItem> _messageItems = [];
   bool _hasMarkedReadOnScroll = false;
   String? _currentLoadedSessionKey; // Step 3 fix: prevent infinite reload
@@ -198,6 +203,22 @@ class _ChatScreenState extends State<ChatScreen> {
                   ? null
                   : Text(command.description!,
                       maxLines: 1, overflow: TextOverflow.ellipsis),
+              trailing: command.hint == null
+                  ? null
+                  : ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 140),
+                      child: Text(
+                        command.hint!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                          color:
+                              isDarkMode ? Colors.grey[500] : Colors.grey[600],
+                        ),
+                      ),
+                    ),
               onTap: () {
                 _controller.value = TextEditingValue(
                   text: '/${command.name} ',
@@ -209,6 +230,69 @@ class _ChatScreenState extends State<ChatScreen> {
         ],
       ),
     );
+  }
+
+  Widget _buildPendingAttachment(Attachment attachment) {
+    final colors = FluentColors.of(context);
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 200),
+      padding: const EdgeInsets.only(left: 8, right: 2),
+      decoration: BoxDecoration(
+        color: colors.control,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: colors.stroke),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.image_outlined, size: 14, color: colors.textSecondary),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              attachment.filename,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: colors.textPrimary),
+            ),
+          ),
+          IconButton(
+            key: ValueKey('remove-attachment-${attachment.id}'),
+            onPressed: () {
+              setState(() => _pendingAttachments.remove(attachment));
+            },
+            tooltip: '移除',
+            icon: Icon(Icons.close, size: 14, color: colors.textSecondary),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickAttachment() async {
+    final wsService = _wsService;
+    if (wsService != null && !wsService.supportsImagePrompts) {
+      showAppNotice(context, '当前 Agent 不支持图片消息');
+      return;
+    }
+    if (_pendingAttachments.length >= AttachmentService.maxAttachments) {
+      showAppNotice(
+        context,
+        '一条消息最多附加 ${AttachmentService.maxAttachments} 张图片',
+      );
+      return;
+    }
+    setState(() => _isPickingAttachment = true);
+    try {
+      final attachment = await AttachmentService.pickImage();
+      if (attachment == null || !mounted) return;
+      setState(() => _pendingAttachments.add(attachment));
+    } catch (error) {
+      if (mounted) showAppNotice(context, '添加图片失败：$error');
+    } finally {
+      if (mounted) setState(() => _isPickingAttachment = false);
+    }
   }
 
   /// Build message items with time dividers
@@ -370,6 +454,45 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
               ),
 
+              if (session.contextUsageLabel != null) ...[
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isDarkMode ? Colors.grey[800] : Colors.grey[100],
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.data_usage,
+                          size: 12,
+                          color:
+                              isDarkMode ? Colors.grey[400] : Colors.grey[600],
+                        ),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            session.contextUsageLabel!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDarkMode
+                                  ? Colors.grey[400]
+                                  : Colors.grey[600],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+
               const Spacer(),
               Text(
                 _formatSessionTime(session.sessionKey),
@@ -490,13 +613,32 @@ class _ChatScreenState extends State<ChatScreen> {
     return PopupMenuButton<String>(
       tooltip: option.description ?? option.name,
       onSelected: (value) => _changeConfigOption(wsService, option, value),
-      itemBuilder: (context) => [
-        for (final value in option.options)
-          PopupMenuItem(
+      itemBuilder: (context) {
+        final items = <PopupMenuEntry<String>>[];
+        String? group;
+        for (final value in option.options) {
+          final header = value.group;
+          if (header != null && header != group) {
+            group = header;
+            items.add(PopupMenuItem<String>(
+              enabled: false,
+              height: 30,
+              child: Text(
+                header,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isDarkMode ? Colors.grey[500] : Colors.grey[600],
+                ),
+              ),
+            ));
+          }
+          items.add(PopupMenuItem(
             value: value.value,
             child: Text(value.name),
-          ),
-      ],
+          ));
+        }
+        return items;
+      },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         decoration: BoxDecoration(
@@ -807,7 +949,17 @@ class _ChatScreenState extends State<ChatScreen> {
       await _showAskQuestionDialog(request);
     } else if (method == 'cursor/create_plan') {
       await _showCreatePlanDialog(request);
+    } else if (method == 'elicitation/create') {
+      await _showElicitationDialog(request);
     }
+  }
+
+  Future<void> _showElicitationDialog(Map<String, dynamic> request) async {
+    final wsService = _wsService;
+    if (wsService == null) return;
+    final params = request['params'] as Map<String, dynamic>? ?? const {};
+    final result = await showElicitationDialog(context, params);
+    wsService.respondToAgentRequest(request['id'], result);
   }
 
   Future<void> _showAskQuestionDialog(Map<String, dynamic> request) async {
@@ -1161,9 +1313,53 @@ class _ChatScreenState extends State<ChatScreen> {
                       );
                     },
                   ),
+                  if (_pendingAttachments.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            for (final attachment in _pendingAttachments)
+                              _buildPendingAttachment(attachment),
+                          ],
+                        ),
+                      ),
+                    ),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
+                      if (wsService.supportsImagePrompts) ...[
+                        IconButton(
+                          key: const ValueKey('chat-attach-image'),
+                          onPressed:
+                              _isPickingAttachment ? null : _pickAttachment,
+                          tooltip: '添加图片',
+                          icon: _isPickingAttachment
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(
+                                  Icons.add_photo_alternate_outlined,
+                                  size: 20,
+                                ),
+                          style: IconButton.styleFrom(
+                            foregroundColor: colors.textSecondary,
+                            side: BorderSide(color: colors.strokeStrong),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                          constraints: const BoxConstraints.tightFor(
+                              width: 36, height: 36),
+                        ),
+                        const SizedBox(width: 4),
+                      ],
                       Expanded(
                         child: Container(
                           constraints: const BoxConstraints(maxHeight: 100),
@@ -1244,7 +1440,8 @@ class _ChatScreenState extends State<ChatScreen> {
                         ValueListenableBuilder<TextEditingValue>(
                           valueListenable: _controller,
                           builder: (context, value, child) {
-                            final canSend = value.text.trim().isNotEmpty;
+                            final canSend = value.text.trim().isNotEmpty ||
+                                _pendingAttachments.isNotEmpty;
                             return IconButton(
                               onPressed: canSend ? _sendMessage : null,
                               tooltip: '发送',
@@ -1648,17 +1845,19 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _sendMessage() async {
     final text = _controller.text.trim();
-    if (text.isEmpty) return;
+    final attachments = List<Attachment>.of(_pendingAttachments);
+    if (text.isEmpty && attachments.isEmpty) return;
 
     Logger.info('[UI] _sendMessage called: "$text"');
     Logger.info('[UI] wsService: $_wsService');
 
     // Clear input first (before sending)
     _controller.clear();
-
-    // Clear typing indicator when user sends message
     if (mounted) {
-      setState(() => _isTyping = false);
+      setState(() {
+        _pendingAttachments.clear();
+        _isTyping = false;
+      });
     }
 
     // Step 2 fix: only send via wsService, SessionState handles message storage
@@ -1667,14 +1866,14 @@ class _ChatScreenState extends State<ChatScreen> {
       if (wsService == null) {
         Logger.error('[UI] wsService is null!');
         if (mounted) {
-          _controller.text = text;
+          setState(() => _restoreDraft(text, attachments));
           showAppNotice(context, '发送失败：未连接到 Agent');
         }
         return;
       }
       Logger.info('[UI] Calling wsService.sendMessage...');
       if (mounted) setState(() => _isGenerating = true);
-      await wsService.sendMessage(text);
+      await wsService.sendMessageWithAttachments(text, attachments);
       Logger.info('[UI] wsService.sendMessage completed');
       // Sync UI immediately after sending
       if (mounted) {
@@ -1686,10 +1885,19 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (e) {
       Logger.error('[UI] Failed to send message: $e');
       if (mounted) {
-        _controller.text = text;
-        setState(() => _isGenerating = false);
+        setState(() {
+          _restoreDraft(text, attachments);
+          _isGenerating = false;
+        });
         showAppNotice(context, '发送失败：$e');
       }
+    }
+  }
+
+  void _restoreDraft(String text, List<Attachment> attachments) {
+    _controller.text = text;
+    if (attachments.isNotEmpty) {
+      _pendingAttachments.insertAll(0, attachments);
     }
   }
 

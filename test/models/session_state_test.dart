@@ -66,7 +66,8 @@ void main() {
         expect(session.unreadCount, 1);
       });
 
-      test('Add AI message to active session does not increase unread count', () {
+      test('Add AI message to active session does not increase unread count',
+          () {
         session.activate();
 
         final aiMessage = Message(
@@ -98,9 +99,18 @@ void main() {
 
       test('Messages are ordered by insertion', () {
         final now = DateTime.now();
-        final msg1 = Message(id: '1', text: 'First', isUser: true, timestamp: now);
-        final msg2 = Message(id: '2', text: 'Second', isUser: false, timestamp: now.add(const Duration(seconds: 1)));
-        final msg3 = Message(id: '3', text: 'Third', isUser: true, timestamp: now.add(const Duration(seconds: 2)));
+        final msg1 =
+            Message(id: '1', text: 'First', isUser: true, timestamp: now);
+        final msg2 = Message(
+            id: '2',
+            text: 'Second',
+            isUser: false,
+            timestamp: now.add(const Duration(seconds: 1)));
+        final msg3 = Message(
+            id: '3',
+            text: 'Third',
+            isUser: true,
+            timestamp: now.add(const Duration(seconds: 2)));
 
         session.addMessage(msg1);
         session.addMessage(msg2);
@@ -135,9 +145,15 @@ void main() {
       });
 
       test('Update last message does not affect user messages', () {
-        final userMsg = Message(id: 'u1', text: 'User', isUser: true, timestamp: DateTime.now());
-        final aiMsg = Message(id: 'ai1', text: 'AI', isUser: false, timestamp: DateTime.now());
-        final updatedAiMsg = Message(id: 'ai1', text: 'AI Updated', isUser: false, timestamp: DateTime.now());
+        final userMsg = Message(
+            id: 'u1', text: 'User', isUser: true, timestamp: DateTime.now());
+        final aiMsg = Message(
+            id: 'ai1', text: 'AI', isUser: false, timestamp: DateTime.now());
+        final updatedAiMsg = Message(
+            id: 'ai1',
+            text: 'AI Updated',
+            isUser: false,
+            timestamp: DateTime.now());
 
         session.addMessage(userMsg);
         session.addMessage(aiMsg);
@@ -151,7 +167,8 @@ void main() {
 
     group('Clear Messages', () {
       test('Clear messages resets all state', () {
-        final msg = Message(id: '1', text: 'Test', isUser: true, timestamp: DateTime.now());
+        final msg = Message(
+            id: '1', text: 'Test', isUser: true, timestamp: DateTime.now());
         session.addMessage(msg);
         session.unreadCount = 5;
 
@@ -165,8 +182,10 @@ void main() {
 
     group('To ChatSession Conversion', () {
       test('Converts to ChatSession correctly', () {
-        final userMsg = Message(id: '1', text: 'User msg', isUser: true, timestamp: DateTime.now());
-        final aiMsg = Message(id: '2', text: 'AI msg', isUser: false, timestamp: DateTime.now());
+        final userMsg = Message(
+            id: '1', text: 'User msg', isUser: true, timestamp: DateTime.now());
+        final aiMsg = Message(
+            id: '2', text: 'AI msg', isUser: false, timestamp: DateTime.now());
 
         session.addMessage(userMsg);
         session.addMessage(aiMsg);
@@ -178,6 +197,46 @@ void main() {
         expect(chatSession.messages.length, 2);
         expect(chatSession.unreadCount, 3);
         expect(chatSession.agentId, 'main');
+      });
+
+      test('Persists agent usage, cost and workspace roots', () {
+        session
+          ..agentTitle = 'Agent title'
+          ..additionalDirectories = const ['/repo/a', '/repo/b']
+          ..totalTokens = 1200
+          ..contextTokens = 200000
+          ..costAmount = 0.42
+          ..costCurrency = 'USD';
+
+        final chatSession = session.toChatSession();
+        expect(chatSession.agentTitle, 'Agent title');
+        expect(chatSession.additionalDirectories, ['/repo/a', '/repo/b']);
+        expect(chatSession.totalTokens, 1200);
+        expect(chatSession.contextTokens, 200000);
+        expect(chatSession.costAmount, 0.42);
+        expect(chatSession.costCurrency, 'USD');
+
+        final restored = SessionState.fromChatSession(chatSession);
+        expect(restored.agentTitle, 'Agent title');
+        expect(restored.additionalDirectories, ['/repo/a', '/repo/b']);
+        expect(restored.totalTokens, 1200);
+        expect(restored.contextTokens, 200000);
+        expect(restored.costAmount, 0.42);
+        expect(restored.costCurrency, 'USD');
+        expect(restored.contextUsageLabel, '1.2k / 200k · USD 0.42');
+
+        final decoded = ChatSession.fromJson(chatSession.toJson());
+        expect(decoded.agentTitle, 'Agent title');
+        expect(decoded.additionalDirectories, ['/repo/a', '/repo/b']);
+        expect(decoded.totalTokens, 1200);
+        expect(decoded.costAmount, 0.42);
+      });
+
+      test('Custom title wins over the agent title', () {
+        session.agentTitle = 'Agent title';
+        expect(session.displayTitle, 'Agent title');
+        session.customTitle = 'My title';
+        expect(session.displayTitle, 'My title');
       });
     });
 
@@ -213,8 +272,10 @@ void main() {
     });
 
     test('Sessions are independent', () {
-      final msgA = Message(id: 'a1', text: 'A msg', isUser: false, timestamp: DateTime.now());
-      final msgB = Message(id: 'b1', text: 'B msg', isUser: true, timestamp: DateTime.now());
+      final msgA = Message(
+          id: 'a1', text: 'A msg', isUser: false, timestamp: DateTime.now());
+      final msgB = Message(
+          id: 'b1', text: 'B msg', isUser: true, timestamp: DateTime.now());
 
       sessionA.addMessage(msgA);
       sessionB.addMessage(msgB);
@@ -227,7 +288,8 @@ void main() {
 
     test('Activate one session does not affect another', () {
       sessionA.activate();
-      final aiMsg = Message(id: 'b1', text: 'AI reply', isUser: false, timestamp: DateTime.now());
+      final aiMsg = Message(
+          id: 'b1', text: 'AI reply', isUser: false, timestamp: DateTime.now());
 
       sessionB.addMessage(aiMsg);
 
@@ -256,9 +318,18 @@ void main() {
 
     test('Mark messages as read sets readAt for unread AI messages', () {
       final now = DateTime.now();
-      final userMsg = Message(id: 'u1', text: 'User', isUser: true, timestamp: now);
-      final aiMsg1 = Message(id: 'a1', text: 'AI 1', isUser: false, timestamp: now.add(const Duration(seconds: 1)));
-      final aiMsg2 = Message(id: 'a2', text: 'AI 2', isUser: false, timestamp: now.add(const Duration(seconds: 2)));
+      final userMsg =
+          Message(id: 'u1', text: 'User', isUser: true, timestamp: now);
+      final aiMsg1 = Message(
+          id: 'a1',
+          text: 'AI 1',
+          isUser: false,
+          timestamp: now.add(const Duration(seconds: 1)));
+      final aiMsg2 = Message(
+          id: 'a2',
+          text: 'AI 2',
+          isUser: false,
+          timestamp: now.add(const Duration(seconds: 2)));
 
       session.addMessage(userMsg);
       session.addMessage(aiMsg1);
@@ -273,8 +344,11 @@ void main() {
         return m;
       }).toList();
 
-      expect(session.messages.where((m) => !m.isUser && m.readAt != null).length, 2);
-      expect(session.messages.where((m) => m.isUser && m.readAt == null).length, 1);
+      expect(
+          session.messages.where((m) => !m.isUser && m.readAt != null).length,
+          2);
+      expect(session.messages.where((m) => m.isUser && m.readAt == null).length,
+          1);
     });
   });
 
@@ -317,9 +391,12 @@ void main() {
     });
 
     test('Update message by ID updates correct message', () {
-      final msg1 = Message(id: 'm1', text: 'Msg 1', isUser: true, timestamp: DateTime.now());
-      final msg2 = Message(id: 'm2', text: 'Msg 2', isUser: true, timestamp: DateTime.now());
-      final msg3 = Message(id: 'm3', text: 'Msg 3', isUser: true, timestamp: DateTime.now());
+      final msg1 = Message(
+          id: 'm1', text: 'Msg 1', isUser: true, timestamp: DateTime.now());
+      final msg2 = Message(
+          id: 'm2', text: 'Msg 2', isUser: true, timestamp: DateTime.now());
+      final msg3 = Message(
+          id: 'm3', text: 'Msg 3', isUser: true, timestamp: DateTime.now());
 
       session.addMessage(msg1);
       session.addMessage(msg2);
@@ -353,10 +430,15 @@ void main() {
     });
 
     test('Update non-existent message does nothing', () {
-      final msg = Message(id: 'm1', text: 'Test', isUser: true, timestamp: DateTime.now());
+      final msg = Message(
+          id: 'm1', text: 'Test', isUser: true, timestamp: DateTime.now());
       session.addMessage(msg);
 
-      final nonExistent = Message(id: 'non-existent', text: 'Not added', isUser: true, timestamp: DateTime.now());
+      final nonExistent = Message(
+          id: 'non-existent',
+          text: 'Not added',
+          isUser: true,
+          timestamp: DateTime.now());
       session.updateMessage(nonExistent);
 
       expect(session.messages.length, 1);

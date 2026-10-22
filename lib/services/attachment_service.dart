@@ -1,11 +1,29 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:mime/mime.dart';
 import 'package:pocket_bot/models/attachment.dart';
 import 'package:pocket_bot/utils/logger.dart';
+import 'package:uuid/uuid.dart';
+
+/// Raised when a picked file cannot be sent as an ACP attachment.
+class AttachmentException implements Exception {
+  final String message;
+
+  const AttachmentException(this.message);
+
+  @override
+  String toString() => message;
+}
 
 /// Service for handling file attachments
 class AttachmentService {
   /// Maximum file size for Base64 encoding (5MB)
   static const int maxFileSize = 5 * 1024 * 1024;
+
+  /// Maximum number of images attached to one prompt.
+  static const int maxAttachments = 4;
 
   /// Allowed MIME types for file transfer
   static const List<String> allowedMimeTypes = [
@@ -41,23 +59,62 @@ class AttachmentService {
     'application/x-7z-compressed',
   ];
 
-  /// Pick files from device (currently disabled - no file picker)
-  /// Returns empty list as file picker is not available
+  /// Pick arbitrary files from device.
+  ///
+  /// Unsupported: only images can be picked, through [pickImage].
   static Future<List<Attachment>> pickFiles() async {
     Logger.info('File picker is not available in this version');
     return [];
   }
 
-  /// Pick a single image (currently disabled)
+  /// Lets integration tests bypass the OS gallery picker.
+  @visibleForTesting
+  static Future<Attachment?> Function()? pickImageOverride;
+
+  /// Pick an image from the gallery and encode it for an ACP image prompt.
   static Future<Attachment?> pickImage() async {
-    Logger.info('File picker is not available in this version');
-    return null;
+    final override = pickImageOverride;
+    if (override != null) return override();
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 2048,
+      maxHeight: 2048,
+      imageQuality: 88,
+    );
+    if (picked == null) return null;
+    return attachmentFromXFile(picked);
+  }
+
+  /// Reads [file] into base64 and validates it can be sent as an image block.
+  static Future<Attachment> attachmentFromXFile(XFile file) async {
+    final bytes = await file.readAsBytes();
+    if (bytes.isEmpty) {
+      throw const AttachmentException('图片内容为空');
+    }
+    if (bytes.length > maxFileSize) {
+      throw const AttachmentException('图片不能超过 5MB');
+    }
+    final mimeType = file.mimeType ??
+        lookupMimeType(file.name, headerBytes: bytes.take(32).toList()) ??
+        'application/octet-stream';
+    if (!mimeType.startsWith('image/')) {
+      throw const AttachmentException('只能发送图片附件');
+    }
+    Logger.info('[Attachment] Picked ${file.name} (${bytes.length} bytes)');
+    return Attachment(
+      id: const Uuid().v4(),
+      filename: file.name,
+      mimeType: mimeType,
+      size: bytes.length,
+      data: base64Encode(bytes),
+      filePath: file.path.isEmpty ? null : file.path,
+    );
   }
 
   /// Get file icon based on MIME type or extension
   static String getFileIcon(String filename) {
     final extension = filename.split('.').last.toLowerCase();
-    
+
     final iconMap = {
       // Images
       'jpg': 'image',
@@ -100,7 +157,7 @@ class AttachmentService {
       'avi': 'videocam',
       'webm': 'videocam',
     };
-    
+
     return iconMap[extension] ?? 'insert_drive_file';
   }
 
@@ -108,7 +165,9 @@ class AttachmentService {
   static String formatSize(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 }

@@ -10,12 +10,14 @@ import 'package:pocket_bot/models/mcp_server_config.dart';
 import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/models/session_state.dart';
 import 'package:pocket_bot/services/acp_file_system.dart';
+import 'package:pocket_bot/services/acp_terminal.dart';
 import 'package:pocket_bot/services/acp_transport.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
 import 'package:pocket_bot/services/notification_service.dart';
 import 'package:pocket_bot/utils/acp_stream_text.dart';
 import 'package:pocket_bot/utils/debug_log.dart';
 import 'package:pocket_bot/utils/logger.dart';
+import 'package:pocket_bot/utils/version_utils.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 enum ConnectionState { disconnected, connecting, connected, error }
@@ -143,6 +145,10 @@ class AcpPermissionRequest {
   final String? detail;
   final List<AcpPermissionOption> options;
 
+  /// ACP tool kind (`execute`, `edit`, ...); the unit remembered by
+  /// `allow_always`.
+  final String? toolKind;
+
   const AcpPermissionRequest({
     required this.requestId,
     required this.sessionId,
@@ -150,6 +156,7 @@ class AcpPermissionRequest {
     required this.options,
     this.toolCallId,
     this.detail,
+    this.toolKind,
   });
 
   String get key => requestId.toString();
@@ -160,10 +167,14 @@ class AcpConfigOptionValue {
   final String name;
   final String? description;
 
+  /// Group header the agent put this value under, when options are grouped.
+  final String? group;
+
   const AcpConfigOptionValue({
     required this.value,
     required this.name,
     this.description,
+    this.group,
   });
 
   factory AcpConfigOptionValue.fromJson(Map<String, dynamic> json) {
@@ -172,6 +183,7 @@ class AcpConfigOptionValue {
       value: value,
       name: json['name'] as String? ?? value,
       description: json['description'] as String?,
+      group: json['group'] as String?,
     );
   }
 }
@@ -212,15 +224,35 @@ class AcpConfigOption {
       category: json['category'] as String?,
       type: json['type'] as String? ?? 'select',
       currentValue: json['currentValue'],
-      options: (json['options'] as List? ?? const [])
-          .map((item) => AcpConfigOptionValue.fromJson(
-                item is Map<String, dynamic>
-                    ? item
-                    : Map<String, dynamic>.from(item as Map),
-              ))
-          .where((item) => item.value.isNotEmpty)
-          .toList(),
+      options: [
+        for (final entry in json['options'] as List? ?? const [])
+          ..._valuesFromJson(entry),
+      ],
     );
+  }
+
+  /// A select entry is either a value or a `{group, name, options: [...]}`
+  /// header; groups are flattened so the menu can render both shapes.
+  static List<AcpConfigOptionValue> _valuesFromJson(Object? entry) {
+    if (entry is! Map) return const [];
+    final json = Map<String, dynamic>.from(entry);
+    final grouped = json['options'];
+    if (grouped is List) {
+      final header = (json['name'] as String?)?.trim();
+      final label = header == null || header.isEmpty
+          ? (json['group'] as String?)?.trim()
+          : header;
+      return [
+        for (final item in grouped)
+          if (item is Map)
+            ..._valuesFromJson({
+              ...Map<String, dynamic>.from(item),
+              if (label != null && label.isNotEmpty) 'group': label,
+            }),
+      ];
+    }
+    final value = AcpConfigOptionValue.fromJson(json);
+    return value.value.isEmpty ? const [] : [value];
   }
 }
 
@@ -240,6 +272,8 @@ class WebSocketService with ChangeNotifier {
   /// [AcpTransportFactory.open], which logs in to SSH on its own.
   Future<AcpTransport> Function(GatewayInfo target)? transportOpener;
   AcpTransport? _transport;
+  AcpTerminalHost? _terminalHost;
+  final Map<String, _ActiveTerminal> _terminals = {};
   StreamSubscription? _channelSubscription;
   ConnectionState _state = ConnectionState.disconnected;
   String? _errorMessage;
@@ -250,6 +284,9 @@ class WebSocketService with ChangeNotifier {
   /// Folder each ACP session was opened in. One agent process can serve
   /// several folders; sessions without an entry use [_workingDirectory].
   final Map<String, String> _sessionCwd = {};
+
+  /// Extra workspace roots reported by the agent for each session.
+  final Map<String, List<String>> _sessionAdditionalDirs = {};
   Map<String, dynamic> _agentCapabilities = const {};
   Map<String, dynamic>? _agentInfo;
   String? _currentModeId;
@@ -258,7 +295,11 @@ class WebSocketService with ChangeNotifier {
   List<AcpSlashCommand> _availableCommands = const [];
   List<AcpTodoItem> _todos = const [];
   Map<String, dynamic>? _pendingClientRequest;
+  final Map<String, String> _urlElicitationSessions = {};
   final Map<String, AcpPermissionRequest> _pendingPermissions = {};
+
+  /// Tool kinds the user allowed for the rest of a session, per session key.
+  final Map<String, Set<String>> _alwaysAllowedToolKinds = {};
   final Map<String, List<AcpPlanEntry>> _plans = {};
   final Map<String, AcpToolCall> _toolCalls = {};
   List<McpServerConfig> _mcpServers = const [];
@@ -273,6 +314,17 @@ class WebSocketService with ChangeNotifier {
   final Map<String, String> _pendingUserMessages = {};
   final Map<String, Completer<void>> _promptWaiters = {};
   final Set<String> _quietSessions = {};
+
+  /// session/update notifications received while session/load replays the
+  /// conversation. They are applied only after the load response arrives so a
+  /// failed load leaves the locally stored history untouched.
+  final Map<String, List<Map<String, dynamic>>> _loadReplays = {};
+
+  /// In-flight attach per session key, so concurrent prompts reuse one
+  /// session/new|resume|load instead of racing and dropping history.
+  final Map<String, Future<String>> _attachingSessions = {};
+  final Map<String, String> _replayRoles = {};
+  final Map<String, String> _replayUserMessages = {};
 
   final _messageController = StreamController<Message>.broadcast();
   final _messageUpdateController = StreamController<Message>.broadcast();
@@ -311,10 +363,10 @@ class WebSocketService with ChangeNotifier {
   Map<String, dynamic>? get agentInfo =>
       _agentInfo == null ? null : Map.unmodifiable(_agentInfo!);
   String? get currentModeId => _currentModeId;
-  List<AcpSessionMode> get availableModes =>
-      List.unmodifiable(_availableModes);
-  List<AcpConfigOption> get configOptions =>
-      List.unmodifiable(_configOptions);
+  List<AcpSessionMode> get availableModes => List.unmodifiable(_availableModes);
+  List<AcpConfigOption> get configOptions => List.unmodifiable(_configOptions);
+  bool get supportsImagePrompts =>
+      _asMap(_agentCapabilities['promptCapabilities'])['image'] == true;
   List<AcpSlashCommand> get availableCommands =>
       List.unmodifiable(_availableCommands);
   List<AcpTodoItem> get todos => List.unmodifiable(_todos);
@@ -361,17 +413,20 @@ class WebSocketService with ChangeNotifier {
 
   List<Map<String, dynamic>> _mcpServersForAgent() {
     final caps = _asMap(_agentCapabilities['mcpCapabilities']);
-    return _mcpServers.where((server) {
-      if (!server.enabled || !server.isValid) return false;
-      switch (server.transport) {
-        case McpTransport.stdio:
-          return true;
-        case McpTransport.http:
-          return caps['http'] == true;
-        case McpTransport.sse:
-          return caps['sse'] == true;
-      }
-    }).map((server) => server.toAcp()).toList();
+    return _mcpServers
+        .where((server) {
+          if (!server.enabled || !server.isValid) return false;
+          switch (server.transport) {
+            case McpTransport.stdio:
+              return true;
+            case McpTransport.http:
+              return caps['http'] == true;
+            case McpTransport.sse:
+              return caps['sse'] == true;
+          }
+        })
+        .map((server) => server.toAcp())
+        .toList();
   }
 
   List<AcpPlanEntry> planFor(String? sessionKey) =>
@@ -439,6 +494,7 @@ class WebSocketService with ChangeNotifier {
 
     try {
       _transport = transport;
+      _terminalHost = transport.terminalHost;
       _channelSubscription = transport.incoming.listen(
         _handleFrame,
         onError: _handleSocketError,
@@ -468,7 +524,18 @@ class WebSocketService with ChangeNotifier {
               'readTextFile': transport.fileSystem != null,
               'writeTextFile': transport.fileSystem != null,
             },
-            'terminal': false,
+            'terminal': transport.terminalHost != null,
+            'elicitation': {
+              'form': <String, dynamic>{},
+              'url': <String, dynamic>{},
+            },
+            'session': {
+              'configOptions': {
+                'boolean': <String, dynamic>{},
+              },
+              'notices': <String, dynamic>{},
+              'compaction': <String, dynamic>{},
+            },
             '_meta': {
               'parameterizedModelPicker': true,
             },
@@ -476,7 +543,7 @@ class WebSocketService with ChangeNotifier {
           'clientInfo': {
             'name': 'pocketbot',
             'title': 'PocketBot',
-            'version': '1.1.0',
+            'version': AppVersion.baseVersion,
           },
         },
         timeout: const Duration(minutes: 3),
@@ -537,7 +604,9 @@ class WebSocketService with ChangeNotifier {
     _todos = const [];
     _currentModeId = null;
     _pendingClientRequest = null;
+    _urlElicitationSessions.clear();
     _pendingPermissions.clear();
+    _alwaysAllowedToolKinds.clear();
     _frameCoalescer.flush();
     _clearLiveText();
     await _closeTransport();
@@ -547,10 +616,39 @@ class WebSocketService with ChangeNotifier {
   }
 
   Future<void> _closeTransport() async {
+    await _releaseAllTerminals();
     await _channelSubscription?.cancel();
     _channelSubscription = null;
     await _transport?.close();
     _transport = null;
+  }
+
+  Future<void> _releaseAllTerminals() async {
+    final terminals = _terminals.values.toList();
+    _terminals.clear();
+    for (final active in terminals) {
+      try {
+        await active.terminal.release();
+      } catch (_) {}
+    }
+    final host = _terminalHost;
+    _terminalHost = null;
+    try {
+      await host?.dispose();
+    } catch (_) {}
+  }
+
+  Future<void> _releaseTerminalsForSession(String sessionId) async {
+    final ids = _terminals.entries
+        .where((entry) => entry.value.sessionId == sessionId)
+        .map((entry) => entry.key)
+        .toList();
+    for (final id in ids) {
+      final active = _terminals.remove(id);
+      try {
+        await active?.terminal.release();
+      } catch (_) {}
+    }
   }
 
   void _handleFrame(dynamic data) {
@@ -586,6 +684,8 @@ class WebSocketService with ChangeNotifier {
       _handleResponse(message);
     } else if (method == 'session/update') {
       _handleSessionUpdate(_asMap(message['params']));
+    } else if (method == 'elicitation/complete') {
+      _handleElicitationComplete(_asMap(message['params']));
     } else if (message.containsKey('id') && message.containsKey('method')) {
       _handleAgentRequest(message);
     } else if (message.containsKey('method')) {
@@ -595,7 +695,8 @@ class WebSocketService with ChangeNotifier {
 
   bool _isStreamingUpdate(Map<String, dynamic> params) {
     final kind = _asMap(params['update'])['sessionUpdate'] as String?;
-    return kind == 'agent_message_chunk' ||
+    return kind == 'user_message_chunk' ||
+        kind == 'agent_message_chunk' ||
         kind == 'agent_thought_chunk' ||
         kind == 'tool_call' ||
         kind == 'tool_call_update' ||
@@ -604,6 +705,7 @@ class WebSocketService with ChangeNotifier {
 
   void _handleResponse(Map<String, dynamic> message) {
     final id = message['id'].toString();
+    final result = _asMap(message['result']);
     final completer = _pendingRpc.remove(id);
     if (completer != null && !completer.isCompleted) {
       if (message['error'] != null) {
@@ -612,7 +714,7 @@ class WebSocketService with ChangeNotifier {
           'ACP ${error['code'] ?? 'error'}: ${error['message'] ?? 'Request failed'}',
         ));
       } else {
-        completer.complete(_asMap(message['result']));
+        completer.complete(result);
       }
     }
 
@@ -640,26 +742,68 @@ class WebSocketService with ChangeNotifier {
           }
         }
         _finishStreamingMessage(session);
+        if (message['error'] == null) {
+          _applyStopReason(session, result['stopReason']);
+        }
       }
     }
   }
 
-  Future<void> _authenticateIfNeeded(Map<String, dynamic> initialize) async {
-    final methods = initialize['authMethods'] as List? ?? const [];
-    if (methods.isEmpty) return;
+  void _applyStopReason(SessionState session, dynamic raw) {
+    final reason = raw is String ? raw.trim() : '';
+    final text = switch (reason) {
+      'max_tokens' => '本次回复达到长度上限，内容可能不完整。',
+      'max_turn_requests' => '本次任务达到 Agent 的最大请求轮数。',
+      'refusal' => 'Agent 拒绝继续处理本次请求。',
+      _ => null,
+    };
+    if (text == null) return;
+    _upsertSpecialMessage(
+      session,
+      id: 'stop-${_generateId()}',
+      kind: MessageKind.system,
+      text: text,
+    );
+  }
 
-    String methodId = 'cursor_login';
+  /// Asks the connected agent to discard its stored login credentials.
+  Future<void> logoutAgent() async {
+    _requireConnected();
+    await _request(
+      'logout',
+      const <String, dynamic>{},
+      timeout: const Duration(seconds: 30),
+    );
+  }
+
+  Future<void> _authenticateIfNeeded(Map<String, dynamic> initialize) async {
+    final rawMethods = initialize['authMethods'] as List? ?? const [];
+    // Terminal auth requires relaunching the agent in an interactive TUI,
+    // which PocketBot cannot do. Those methods must not be sent to
+    // `authenticate` (ACP treats them as client-side flows).
+    final methods = rawMethods
+        .map(_asMap)
+        .where((method) => method['type'] != 'terminal')
+        .toList();
+    if (methods.isEmpty) {
+      if (rawMethods.isNotEmpty) {
+        Logger.info(
+            '[ACP] Agent only offers terminal auth; sign in outside PocketBot');
+      }
+      return;
+    }
+
+    String? methodId;
     for (final method in methods) {
-      final value = _asMap(method);
-      final id = value['id'] as String? ?? '';
+      final id = method['id'] as String? ?? '';
+      if (id.isEmpty) continue;
       if (id == 'cursor_login') {
         methodId = id;
         break;
       }
-      if (id.isNotEmpty && methodId == 'cursor_login') {
-        methodId = id;
-      }
+      methodId ??= id;
     }
+    if (methodId == null) return;
     Logger.info('[ACP] Authenticating with $methodId');
     await _request(
       'authenticate',
@@ -683,6 +827,14 @@ class WebSocketService with ChangeNotifier {
       await _handleWriteTextFile(id, _asMap(request['params']));
       return;
     }
+    if (method is String && method.startsWith('terminal/')) {
+      await _handleTerminalRequest(method, id, _asMap(request['params']));
+      return;
+    }
+    if (method == 'elicitation/create') {
+      _handleElicitationRequest(request, _asMap(request['params']));
+      return;
+    }
     if (method is String && method.startsWith('cursor/')) {
       _handleCursorExtension(request, asNotification: false);
       return;
@@ -693,6 +845,199 @@ class WebSocketService with ChangeNotifier {
       'id': id,
       'error': {'code': -32601, 'message': 'Method not supported by PocketBot'},
     });
+  }
+
+  Future<void> _handleTerminalRequest(
+    String method,
+    dynamic id,
+    Map<String, dynamic> params,
+  ) async {
+    final host = _terminalHost;
+    if (host == null) {
+      _sendTerminalError(
+        id,
+        -32601,
+        'Terminal capability is not available for this connection',
+      );
+      return;
+    }
+    final sessionId = (params['sessionId'] as String?)?.trim() ?? '';
+    if (sessionId.isEmpty) {
+      _sendTerminalError(id, -32602, '$method requires sessionId');
+      return;
+    }
+    if (method == 'terminal/create') {
+      await _createTerminal(host, id, sessionId, params);
+      return;
+    }
+
+    final terminalId = (params['terminalId'] as String?)?.trim() ?? '';
+    final active = terminalId.isEmpty ? null : _terminals[terminalId];
+    if (active == null || active.sessionId != sessionId) {
+      _sendTerminalError(id, -32602, 'Unknown terminal: $terminalId');
+      return;
+    }
+
+    switch (method) {
+      case 'terminal/output':
+        final result = <String, dynamic>{
+          'output': active.terminal.output,
+          'truncated': active.terminal.truncated,
+        };
+        if (active.terminal.hasExited) {
+          result['exitStatus'] = _terminalExitStatus(active.terminal);
+        }
+        _sendJson({'jsonrpc': '2.0', 'id': id, 'result': result});
+        return;
+      case 'terminal/wait_for_exit':
+        await active.terminal.exited;
+        _sendJson({
+          'jsonrpc': '2.0',
+          'id': id,
+          'result': _terminalExitStatus(active.terminal),
+        });
+        return;
+      case 'terminal/kill':
+        await active.terminal.kill();
+        _sendJson({
+          'jsonrpc': '2.0',
+          'id': id,
+          'result': <String, dynamic>{},
+        });
+        return;
+      case 'terminal/release':
+        _terminals.remove(terminalId);
+        await active.terminal.release();
+        _sendJson({
+          'jsonrpc': '2.0',
+          'id': id,
+          'result': <String, dynamic>{},
+        });
+        return;
+      default:
+        _sendTerminalError(id, -32601, 'Method not supported by PocketBot');
+    }
+  }
+
+  Future<void> _createTerminal(
+    AcpTerminalHost host,
+    dynamic id,
+    String sessionId,
+    Map<String, dynamic> params,
+  ) async {
+    final command = (params['command'] as String?)?.trim() ?? '';
+    if (command.isEmpty) {
+      _sendTerminalError(id, -32602, 'terminal/create requires command');
+      return;
+    }
+    final args = [
+      for (final arg in params['args'] as List? ?? const [])
+        if (arg != null) '$arg',
+    ];
+    final environment = <String, String>{};
+    for (final entry in params['env'] as List? ?? const []) {
+      final variable = _asMap(entry);
+      final name = (variable['name'] as String?)?.trim() ?? '';
+      if (name.isEmpty) continue;
+      environment[name] = '${variable['value'] ?? ''}';
+    }
+    final rawCwd = params['cwd'];
+    final cwd = rawCwd is String && rawCwd.trim().isNotEmpty
+        ? rawCwd.trim()
+        : workingDirectoryFor(sessionId);
+    final rawLimit = params['outputByteLimit'];
+    final outputByteLimit =
+        rawLimit is int ? rawLimit : int.tryParse('${rawLimit ?? ''}');
+    try {
+      final terminal = await host.create(
+        command: command,
+        args: args,
+        environment: environment,
+        cwd: cwd,
+        outputByteLimit: outputByteLimit,
+      );
+      final terminalId = 'term-${_generateId()}';
+      _terminals[terminalId] = _ActiveTerminal(sessionId, terminal);
+      _sendJson({
+        'jsonrpc': '2.0',
+        'id': id,
+        'result': {'terminalId': terminalId},
+      });
+    } catch (error) {
+      Logger.warning('[ACP] terminal/create failed: $error');
+      _sendTerminalError(
+        id,
+        -32603,
+        'Failed to start terminal: $error',
+      );
+    }
+  }
+
+  Map<String, dynamic> _terminalExitStatus(AcpTerminal terminal) => {
+        'exitCode': terminal.exitCode,
+        'signal': terminal.signal,
+      };
+
+  void _sendTerminalError(dynamic id, int code, String message) {
+    _sendJson({
+      'jsonrpc': '2.0',
+      'id': id,
+      'error': {'code': code, 'message': message},
+    });
+  }
+
+  void _handleElicitationRequest(
+    Map<String, dynamic> request,
+    Map<String, dynamic> params,
+  ) {
+    final mode = params['mode'];
+    if (mode != 'form' && mode != 'url') {
+      _sendJson({
+        'jsonrpc': '2.0',
+        'id': request['id'],
+        'error': {
+          'code': -32602,
+          'message': 'Unsupported elicitation mode: $mode',
+        },
+      });
+      return;
+    }
+    if (mode == 'form' && params['requestedSchema'] is! Map) {
+      _sendJson({
+        'jsonrpc': '2.0',
+        'id': request['id'],
+        'error': {
+          'code': -32602,
+          'message': 'Form elicitation requires requestedSchema',
+        },
+      });
+      return;
+    }
+    final elicitationId = params['elicitationId']?.toString();
+    if (mode == 'url' && elicitationId != null && elicitationId.isNotEmpty) {
+      final sessionKey = params['sessionId'] as String? ?? _activeSessionKey;
+      if (sessionKey != null && sessionKey.isNotEmpty) {
+        _urlElicitationSessions[elicitationId] = sessionKey;
+      }
+    }
+    // No chat UI attached means nobody can answer, so cancel immediately.
+    _presentClientRequest(request, autoResult: {'action': 'cancel'});
+  }
+
+  void _handleElicitationComplete(Map<String, dynamic> params) {
+    final elicitationId = params['elicitationId']?.toString();
+    Logger.info('[ACP] Elicitation complete: ${elicitationId ?? ''}');
+    if (elicitationId == null || elicitationId.isEmpty) return;
+    final sessionKey = _urlElicitationSessions.remove(elicitationId);
+    final session = sessionKey == null ? null : _sessions[sessionKey];
+    if (session == null) return;
+    _upsertSpecialMessage(
+      session,
+      id: 'elicitation-${_generateId()}',
+      kind: MessageKind.system,
+      text: '外部授权流程已完成。',
+    );
+    notifyListeners();
   }
 
   void _handleCursorExtension(
@@ -712,7 +1057,8 @@ class WebSocketService with ChangeNotifier {
         return;
       case 'cursor/create_plan':
         if (session != null) {
-          final plan = params['plan'] as String? ?? params['overview'] as String? ?? '';
+          final plan =
+              params['plan'] as String? ?? params['overview'] as String? ?? '';
           final name = params['name'] as String? ?? 'Plan';
           _upsertSpecialMessage(
             session,
@@ -769,7 +1115,9 @@ class WebSocketService with ChangeNotifier {
           _sendJson({
             'jsonrpc': '2.0',
             'id': id,
-            'result': {'outcome': {'outcome': 'completed'}},
+            'result': {
+              'outcome': {'outcome': 'completed'}
+            },
           });
         }
         return;
@@ -863,14 +1211,17 @@ class WebSocketService with ChangeNotifier {
         .map((item) => AcpPermissionOption.fromJson(_asMap(item)))
         .where((option) => option.optionId.isNotEmpty)
         .toList();
-    final sessionId =
-        params['sessionId'] as String? ?? _activeSessionKey ?? '';
+    final sessionId = params['sessionId'] as String? ?? _activeSessionKey ?? '';
     final toolCall = _asMap(params['toolCall']);
+    final toolKind = _nonEmpty(toolCall['kind']);
+    final remembered = toolKind != null &&
+        (_alwaysAllowedToolKinds[sessionId]?.contains(toolKind) ?? false);
 
-    if (_autoApprovePermissions || options.isEmpty) {
-      final allowed = _preferredAllowOption(options);
+    if (_autoApprovePermissions || remembered || options.isEmpty) {
+      final allowed = _preferredAllowOption(options, preferAlways: remembered);
       Logger.info(
-        '[ACP] Auto-allowing permission ${allowed?.optionId ?? 'cancelled'}',
+        '[ACP] Auto-allowing permission ${allowed?.optionId ?? 'cancelled'}'
+        '${remembered ? ' (remembered $toolKind)' : ''}',
       );
       _sendPermissionOutcome(id, allowed?.optionId);
       return;
@@ -894,10 +1245,12 @@ class WebSocketService with ChangeNotifier {
           '代理请求执行操作',
       detail: _permissionDetail(toolCall),
       options: options,
+      toolKind: toolKind,
     );
     _pendingPermissions[request.key] = request;
     notifyListeners();
-    if (_activeSessionKey != sessionId || !_clientRequestController.hasListener) {
+    if (_activeSessionKey != sessionId ||
+        !_clientRequestController.hasListener) {
       NotificationService().showMessageNotification(
         sessionKey: sessionId,
         sessionName: session?.displayTitle ?? 'PocketBot',
@@ -921,7 +1274,14 @@ class WebSocketService with ChangeNotifier {
   }
 
   AcpPermissionOption? _preferredAllowOption(
-      List<AcpPermissionOption> options) {
+    List<AcpPermissionOption> options, {
+    bool preferAlways = false,
+  }) {
+    if (preferAlways) {
+      for (final option in options) {
+        if (option.kind == 'allow_always') return option;
+      }
+    }
     AcpPermissionOption? fallback;
     for (final option in options) {
       if (option.kind == 'allow_once') return option;
@@ -935,9 +1295,17 @@ class WebSocketService with ChangeNotifier {
     if (_pendingPermissions.remove(request.key) == null) return;
     _sendPermissionOutcome(request.requestId, optionId);
     if (optionId != null) {
-      final option =
-          request.options.where((item) => item.optionId == optionId);
-      final rejected = option.isNotEmpty && !option.first.allows;
+      final option = request.options.where((item) => item.optionId == optionId);
+      final selected = option.isEmpty ? null : option.first;
+      if (selected != null && selected.allows && selected.always) {
+        final kind = request.toolKind;
+        if (kind != null) {
+          _alwaysAllowedToolKinds
+              .putIfAbsent(request.sessionId, () => <String>{})
+              .add(kind);
+        }
+      }
+      final rejected = selected != null && !selected.allows;
       final session = _sessions[request.sessionId];
       if (rejected && session != null && request.toolCallId != null) {
         _upsertToolCall(session, {
@@ -963,8 +1331,8 @@ class WebSocketService with ChangeNotifier {
 
   void _cancelPermissions({String? sessionKey}) {
     final matching = _pendingPermissions.values
-        .where((request) =>
-            sessionKey == null || request.sessionId == sessionKey)
+        .where(
+            (request) => sessionKey == null || request.sessionId == sessionKey)
         .toList();
     for (final request in matching) {
       respondToPermission(request, null);
@@ -1002,7 +1370,7 @@ class WebSocketService with ChangeNotifier {
     } on AcpFileNotFound catch (error) {
       _sendRpcError(id, -32002, error.toString());
     } catch (error) {
-      _sendRpcError(id, -32000, 'Failed to read file: $error');
+      _sendRpcError(id, -32603, 'Failed to read file: $error');
     }
   }
 
@@ -1024,8 +1392,10 @@ class WebSocketService with ChangeNotifier {
         'id': id,
         'result': <String, dynamic>{},
       });
+    } on AcpFileNotFound catch (error) {
+      _sendRpcError(id, -32002, error.toString());
     } catch (error) {
-      _sendRpcError(id, -32000, 'Failed to write file: $error');
+      _sendRpcError(id, -32603, 'Failed to write file: $error');
     }
   }
 
@@ -1059,8 +1429,7 @@ class WebSocketService with ChangeNotifier {
     _transport?.send(frame);
   }
 
-  static String _frameForLog(String frame) =>
-      DebugLog.truncate(frame, 1500);
+  static String _frameForLog(String frame) => DebugLog.truncate(frame, 1500);
 
   void selectSession(String sessionKey, {String? agentId}) {
     activeSession?.deactivate();
@@ -1102,6 +1471,20 @@ class WebSocketService with ChangeNotifier {
     return cwd == null || cwd.trim().isEmpty ? _workingDirectory : cwd;
   }
 
+  List<String> _additionalDirectoriesFor(String sessionKey) {
+    final dirs = _sessionAdditionalDirs[sessionKey];
+    return dirs == null || dirs.isEmpty ? const [] : List.unmodifiable(dirs);
+  }
+
+  List<String> _parseAdditionalDirectories(dynamic raw) {
+    return (raw as List? ?? const [])
+        .whereType<String>()
+        .map((path) => path.trim())
+        .where((path) => path.isNotEmpty)
+        .map(opensshPathToWindows)
+        .toList();
+  }
+
   Future<String> _createRemoteSession({String? cwd}) async {
     final folder = cwd == null || cwd.trim().isEmpty
         ? _workingDirectory
@@ -1116,6 +1499,7 @@ class WebSocketService with ChangeNotifier {
     }
     _sessionCwd[id] = folder;
     _attachedSessions.add(id);
+    _sessions[id]?.workingDirectory = folder;
     _applySessionMeta(result);
     return id;
   }
@@ -1156,15 +1540,16 @@ class WebSocketService with ChangeNotifier {
   }
 
   void _applyModelsFallback(dynamic raw) {
-    if (_configOptions.any((option) =>
-        option.category == 'model' || option.id == 'model')) {
+    if (_configOptions
+        .any((option) => option.category == 'model' || option.id == 'model')) {
       return;
     }
     final models = _asMap(raw);
     final available = (models['availableModels'] as List? ?? const [])
         .map((item) {
           final value = _asMap(item);
-          final id = value['modelId'] as String? ?? value['id'] as String? ?? '';
+          final id =
+              value['modelId'] as String? ?? value['id'] as String? ?? '';
           return AcpConfigOptionValue(
             value: id,
             name: value['name'] as String? ?? id,
@@ -1241,31 +1626,36 @@ class WebSocketService with ChangeNotifier {
         break;
       }
     }
-    final result = await _request('session/set_config_option', {
+    final params = <String, dynamic>{
       'sessionId': remoteKey,
       'configId': configId,
-      'type': option?.isBoolean == true ? 'boolean' : 'id',
       'value': value,
-    });
+    };
+    if (option?.isBoolean == true) params['type'] = 'boolean';
+    final result = await _request('session/set_config_option', params);
     if (result.containsKey('configOptions')) {
       _applySessionMeta(result);
     } else {
-      _configOptions = _configOptions
-          .map((item) => item.id == configId
-              ? AcpConfigOption(
-                  id: item.id,
-                  name: item.name,
-                  description: item.description,
-                  category: item.category,
-                  type: item.type,
-                  currentValue: value,
-                  options: item.options,
-                )
-              : item)
-          .toList();
+      _setConfigOptionValueLocally(configId, value);
       _syncModesFromConfig();
       notifyListeners();
     }
+  }
+
+  void _setConfigOptionValueLocally(String configId, Object? value) {
+    _configOptions = _configOptions
+        .map((item) => item.id == configId
+            ? AcpConfigOption(
+                id: item.id,
+                name: item.name,
+                description: item.description,
+                category: item.category,
+                type: item.type,
+                currentValue: value,
+                options: item.options,
+              )
+            : item)
+        .toList();
   }
 
   void cancelPrompt({String? sessionKey}) {
@@ -1303,13 +1693,28 @@ class WebSocketService with ChangeNotifier {
       customTitle: title,
     );
     _sessions[id] = SessionState.fromChatSession(session);
+    _sessions[id]!.workingDirectory = _sessionCwd[id];
     _sessions[id]!.messageUpdateStream.listen(_messageUpdateController.add);
     return session;
   }
 
-  Future<String> _ensureRemoteSession(String sessionKey, {String? cwd}) async {
+  Future<String> _ensureRemoteSession(String sessionKey, {String? cwd}) {
+    final inFlight = _attachingSessions[sessionKey];
+    if (inFlight != null) return inFlight;
+    final future = _attachSession(sessionKey, cwd: cwd);
+    _attachingSessions[sessionKey] = future;
+    return future.whenComplete(() {
+      if (identical(_attachingSessions[sessionKey], future)) {
+        _attachingSessions.remove(sessionKey);
+      }
+    });
+  }
+
+  Future<String> _attachSession(String sessionKey, {String? cwd}) async {
     if (cwd != null && cwd.trim().isNotEmpty) {
-      _sessionCwd[sessionKey] = opensshPathToWindows(cwd.trim());
+      final folder = opensshPathToWindows(cwd.trim());
+      _sessionCwd[sessionKey] = folder;
+      _sessions[sessionKey]?.workingDirectory = folder;
     }
     if (_attachedSessions.contains(sessionKey)) return sessionKey;
 
@@ -1326,6 +1731,8 @@ class WebSocketService with ChangeNotifier {
         isActive: old?.isActive ?? false,
         unreadCount: old?.unreadCount ?? 0,
         isGatewaySession: true,
+        workingDirectory: _sessionCwd[remoteId],
+        additionalDirectories: old?.additionalDirectories ?? const [],
         customTitle: old?.customTitle,
       );
       replacement.messageUpdateStream.listen(_messageUpdateController.add);
@@ -1338,38 +1745,50 @@ class WebSocketService with ChangeNotifier {
     }
 
     final sessionCaps = _asMap(_agentCapabilities['sessionCapabilities']);
+    final additionalDirectories = _additionalDirectoriesFor(sessionKey);
     if (sessionCaps.containsKey('resume')) {
       final result = await _request('session/resume', {
         'sessionId': sessionKey,
         'cwd': workingDirectoryFor(sessionKey),
+        if (additionalDirectories.isNotEmpty)
+          'additionalDirectories': additionalDirectories,
         'mcpServers': _mcpServersForAgent(),
       });
       _applySessionMeta(result);
     } else if (_agentCapabilities['loadSession'] == true) {
-      final result = await _request('session/load', {
-        'sessionId': sessionKey,
-        'cwd': workingDirectoryFor(sessionKey),
-        'mcpServers': _mcpServersForAgent(),
-      });
-      _applySessionMeta(result);
+      await _loadRemoteSession(sessionKey);
     } else {
       throw Exception('ACP Agent cannot resume session $sessionKey');
     }
     _attachedSessions.add(sessionKey);
+    final attached = _sessions[sessionKey];
+    if (attached != null) {
+      attached.workingDirectory = workingDirectoryFor(sessionKey);
+      attached.additionalDirectories = additionalDirectories;
+    }
     return sessionKey;
   }
 
   Future<void> deleteSession(String sessionKey) async {
     final sessionCaps = _asMap(_agentCapabilities['sessionCapabilities']);
-    if (isConnected &&
-        sessionCaps.containsKey('delete') &&
-        !sessionKey.startsWith('local-')) {
-      await _request('session/delete', {'sessionId': sessionKey});
+    if (isConnected && !sessionKey.startsWith('local-')) {
+      if (sessionCaps.containsKey('delete')) {
+        await _request('session/delete', {'sessionId': sessionKey});
+      } else if (sessionCaps.containsKey('close')) {
+        try {
+          await _request('session/close', {'sessionId': sessionKey});
+        } catch (error) {
+          Logger.info('[ACP] Could not close $sessionKey: $error');
+        }
+      }
     }
     _sessions.remove(sessionKey)?.disposeStreams();
     _attachedSessions.remove(sessionKey);
     _sessionCwd.remove(sessionKey);
+    _sessionAdditionalDirs.remove(sessionKey);
+    _alwaysAllowedToolKinds.remove(sessionKey);
     if (_activeSessionKey == sessionKey) _activeSessionKey = null;
+    await _releaseTerminalsForSession(sessionKey);
     await SessionStorage.deleteSession(sessionKey);
     notifyListeners();
   }
@@ -1395,28 +1814,52 @@ class WebSocketService with ChangeNotifier {
     final sessionCaps = _asMap(_agentCapabilities['sessionCapabilities']);
     if (!sessionCaps.containsKey('list')) return const [];
 
-    final result = await _request('session/list', {});
-    final values = result['sessions'] as List? ?? const [];
-    return values
-        .map((value) {
-          final item = _asMap(value);
-          final id = item['sessionId'] as String? ?? '';
-          final updated =
-              DateTime.tryParse(item['updatedAt'] as String? ?? '') ??
-                  DateTime.now();
-          return ChatSession(
-            id: id,
-            key: id,
-            title: item['title'] as String? ?? '新对话',
-            createdAt: updated,
-            lastUpdated: updated,
-            messages: const [],
-            isGatewaySession: true,
-            sourceGatewayHost: _pendingGateway?.host,
-          );
-        })
-        .where((session) => session.key.isNotEmpty)
-        .toList();
+    final sessions = <ChatSession>[];
+    final seenCursors = <String>{};
+    String? cursor;
+    for (var page = 0; page < 100; page++) {
+      final result = await _request('session/list', {
+        if (cursor != null) 'cursor': cursor,
+      });
+      final values = result['sessions'] as List? ?? const [];
+      for (final value in values) {
+        final item = _asMap(value);
+        final id = item['sessionId'] as String? ?? '';
+        if (id.isEmpty) continue;
+        final updated = DateTime.tryParse(item['updatedAt'] as String? ?? '') ??
+            DateTime.now();
+        final cwd = item['cwd'] as String? ?? '';
+        if (cwd.trim().isNotEmpty) {
+          _sessionCwd[id] = opensshPathToWindows(cwd.trim());
+        }
+        final additionalDirectories =
+            _parseAdditionalDirectories(item['additionalDirectories']);
+        if (additionalDirectories.isEmpty) {
+          _sessionAdditionalDirs.remove(id);
+        } else {
+          _sessionAdditionalDirs[id] = additionalDirectories;
+        }
+        final title = item['title'] as String? ?? '新对话';
+        sessions.add(ChatSession(
+          id: id,
+          key: id,
+          title: title,
+          createdAt: updated,
+          lastUpdated: updated,
+          messages: const [],
+          isGatewaySession: true,
+          sourceGatewayHost: _pendingGateway?.host,
+          workingDirectory:
+              cwd.trim().isEmpty ? null : opensshPathToWindows(cwd.trim()),
+          additionalDirectories: additionalDirectories,
+          agentTitle: title,
+        ));
+      }
+      final next = (result['nextCursor'] as String?)?.trim();
+      if (next == null || next.isEmpty || !seenCursors.add(next)) break;
+      cursor = next;
+    }
+    return sessions;
   }
 
   Future<void> sendMessage(String text, {String? sessionKey}) =>
@@ -1448,7 +1891,8 @@ class WebSocketService with ChangeNotifier {
   }) async {
     final remoteKey = await ensureRemoteSession(sessionKey);
     _quietSessions.add(remoteKey);
-    _sessions.putIfAbsent(remoteKey, () => _newSessionState(remoteKey))
+    _sessions
+        .putIfAbsent(remoteKey, () => _newSessionState(remoteKey))
         .persist = false;
     final done = Completer<void>();
     final sent = await _sendPrompt(
@@ -1468,8 +1912,8 @@ class WebSocketService with ChangeNotifier {
     }
     final session = _sessions[sent.sessionKey];
     if (session == null) return '';
-    final start =
-        session.messages.indexWhere((message) => message.id == sent.userMessageId);
+    final start = session.messages
+        .indexWhere((message) => message.id == sent.userMessageId);
     return session.messages
         .skip(start + 1)
         .where((message) =>
@@ -1566,18 +2010,37 @@ class WebSocketService with ChangeNotifier {
   void _handleSessionUpdate(Map<String, dynamic> params) {
     final sessionKey = params['sessionId'] as String?;
     if (sessionKey == null) return;
-    final update = _asMap(params['update']);
+    final replay = _loadReplays[sessionKey];
+    if (replay != null) {
+      replay.add(params);
+      return;
+    }
+    _applySessionUpdate(sessionKey, _asMap(params['update']));
+  }
+
+  void _applySessionUpdate(
+    String sessionKey,
+    Map<String, dynamic> update, {
+    bool replay = false,
+  }) {
     final kind = update['sessionUpdate'] as String?;
     final session =
         _sessions.putIfAbsent(sessionKey, () => _newSessionState(sessionKey));
 
-    if (kind == 'agent_message_chunk') {
+    if (kind == 'user_message_chunk') {
+      if (replay) _appendReplayUserChunk(session, update);
+    } else if (kind == 'agent_message_chunk') {
+      if (replay) {
+        if (_replayRoles[sessionKey] == 'user') session.currentRunId = null;
+        _replayRoles[sessionKey] = 'agent';
+      }
       final content = _asMap(update['content']);
       final messageId = update['messageId'] as String? ??
           session.currentRunId ??
           _generateId();
       if (content['type'] == 'text') {
-        _appendAgentChunk(session, messageId, content['text'] as String? ?? '');
+        _appendAgentChunk(session, messageId, content['text'] as String? ?? '',
+            replay: replay);
       } else if (content['type'] == 'image') {
         final attachment = Attachment(
           id: messageId,
@@ -1586,9 +2049,11 @@ class WebSocketService with ChangeNotifier {
           size: 0,
           data: content['data'] as String?,
         );
-        _appendAgentChunk(session, messageId, '', attachment: attachment);
+        _appendAgentChunk(session, messageId, '',
+            attachment: attachment, replay: replay);
       }
     } else if (kind == 'agent_thought_chunk') {
+      if (replay) _replayRoles[sessionKey] = 'thought';
       final text = _contentToText(update['content']);
       if (text.isEmpty || isLeakedAgentErrorOnly(text)) return;
       _upsertSpecialMessage(
@@ -1598,9 +2063,14 @@ class WebSocketService with ChangeNotifier {
         text: stripLeakedAgentError(text),
         append: true,
         streaming: _promptInFlight,
+        replay: replay,
       );
     } else if (kind == 'tool_call' || kind == 'tool_call_update') {
-      _upsertToolCall(session, update);
+      if (replay) {
+        _replayRoles[sessionKey] = 'tool';
+        session.currentRunId = null;
+      }
+      _upsertToolCall(session, update, replay: replay);
     } else if (kind == 'available_commands_update') {
       _availableCommands = (update['availableCommands'] as List? ?? const [])
           .map((item) => AcpSlashCommand.fromJson(_asMap(item)))
@@ -1611,24 +2081,285 @@ class WebSocketService with ChangeNotifier {
       _applySessionMeta(update);
     } else if (kind == 'current_mode_update') {
       _currentModeId = update['currentModeId'] as String? ?? _currentModeId;
+      final modeOption = _modeOption;
+      if (modeOption != null && _currentModeId != null) {
+        _setConfigOptionValueLocally(modeOption.id, _currentModeId);
+      }
       notifyListeners();
     } else if (kind == 'plan') {
+      if (replay) {
+        _replayRoles[sessionKey] = 'plan';
+        session.currentRunId = null;
+      }
       _plans[sessionKey] = (update['entries'] as List? ?? const [])
           .map((item) => AcpPlanEntry.fromJson(_asMap(item)))
           .where((entry) => entry.content.isNotEmpty)
           .toList();
       notifyListeners();
     } else if (kind == 'usage_update') {
-      session.model = update['model'] as String? ?? session.model;
+      _applyUsageUpdate(session, update);
+    } else if (kind == 'notice') {
+      _applyNotice(session, update);
+    } else if (kind == 'compaction_update') {
+      _applyCompactionUpdate(session, update);
+    } else if (kind == 'compaction_summary_chunk') {
+      _applyCompactionChunk(session, update);
     } else if (kind == 'session_info_update') {
-      final title = update['title'] as String?;
-      if (title != null && title.isNotEmpty && session.customTitle == null) {
-        session.setCustomTitle(title);
+      if (update.containsKey('title')) {
+        final title = update['title'];
+        session.agentTitle =
+            title is String && title.trim().isNotEmpty ? title.trim() : null;
+        notifyListeners();
+        if (session.persist) {
+          unawaited(SessionStorage.saveSession(session.toChatSession()));
+        }
       }
     }
   }
 
-  void _upsertToolCall(SessionState session, Map<String, dynamic> update) {
+  void _applyUsageUpdate(
+    SessionState session,
+    Map<String, dynamic> update,
+  ) {
+    final used = update['used'];
+    final size = update['size'];
+    if (used is num && used >= 0) session.totalTokens = used.toInt();
+    if (size is num && size >= 0) session.contextTokens = size.toInt();
+    if (update.containsKey('cost')) {
+      final cost = _asMap(update['cost']);
+      final amount = cost['amount'];
+      final currency = _nonEmpty(cost['currency']);
+      if (amount is num && currency != null) {
+        session.costAmount = amount.toDouble();
+        session.costCurrency = currency;
+      } else {
+        session.costAmount = null;
+        session.costCurrency = null;
+      }
+    }
+    notifyListeners();
+    if (session.persist) {
+      unawaited(SessionStorage.saveSession(session.toChatSession()));
+    }
+  }
+
+  void _applyNotice(SessionState session, Map<String, dynamic> update) {
+    final title = _nonEmpty(update['title']);
+    final description = _nonEmpty(update['description']);
+    if (title == null && description == null) return;
+    final severity = _nonEmpty(update['severity']) ?? 'info';
+    final prefix = switch (severity) {
+      'warning' => '注意：',
+      'error' => '错误：',
+      _ => '',
+    };
+    final body = description == null
+        ? '$prefix${title ?? ''}'
+        : '$prefix${title ?? ''}\n$description';
+    _upsertSpecialMessage(
+      session,
+      id: 'notice-${_generateId()}',
+      kind: MessageKind.system,
+      text: body.trim(),
+    );
+  }
+
+  void _applyCompactionChunk(
+    SessionState session,
+    Map<String, dynamic> update,
+  ) {
+    final compactionId = _nonEmpty(update['compactionId']);
+    if (compactionId == null) return;
+    final text = _contentToText(update['content']).trim();
+    if (text.isEmpty) return;
+    _upsertSpecialMessage(
+      session,
+      id: 'compaction-$compactionId',
+      kind: MessageKind.system,
+      text: text,
+      append: true,
+    );
+  }
+
+  void _applyCompactionUpdate(
+    SessionState session,
+    Map<String, dynamic> update,
+  ) {
+    final compactionId = _nonEmpty(update['compactionId']);
+    if (compactionId == null) return;
+    final id = 'compaction-$compactionId';
+    final status = _nonEmpty(update['status']) ?? 'in_progress';
+    final error = _nonEmpty(update['error']);
+    final index = session.messages.indexWhere((message) => message.id == id);
+    String? text;
+    if (update.containsKey('summary')) {
+      text = _contentToText(update['summary']).trim();
+    } else if (index >= 0) {
+      text = session.messages[index].text;
+    }
+    if (error != null) {
+      text = error;
+    } else if (text == null || text.isEmpty) {
+      text = switch (status) {
+        'in_progress' => '正在压缩上下文…',
+        'cancelled' => '上下文压缩已取消',
+        'failed' => '上下文压缩失败',
+        _ => null,
+      };
+    }
+    if (text == null || text.isEmpty) return;
+    _upsertSpecialMessage(session,
+        id: id, kind: MessageKind.system, text: text);
+  }
+
+  void _appendReplayUserChunk(
+    SessionState session,
+    Map<String, dynamic> update,
+  ) {
+    final content = _asMap(update['content']);
+    final explicitId = update['messageId'] as String?;
+    final roleChanged = _replayRoles[session.sessionKey] != 'user';
+    _replayRoles[session.sessionKey] = 'user';
+    if (roleChanged) {
+      _replayUserMessages.remove(session.sessionKey);
+      session.currentRunId = null;
+    }
+    if (explicitId != null) {
+      _replayUserMessages[session.sessionKey] = explicitId;
+    }
+    final messageId = explicitId ??
+        _replayUserMessages.putIfAbsent(session.sessionKey, _generateId);
+
+    var text = '';
+    Attachment? attachment;
+    final type = content['type'];
+    if (type == 'text') {
+      text = content['text'] as String? ?? '';
+    } else if (type == 'image') {
+      attachment = Attachment(
+        id: messageId,
+        filename: 'image',
+        mimeType: content['mimeType'] as String? ?? 'image/png',
+        size: 0,
+        data: content['data'] as String?,
+      );
+    } else if (type == 'resource_link') {
+      final size = content['size'];
+      attachment = Attachment(
+        id: messageId,
+        filename: content['name'] as String? ?? 'attachment',
+        mimeType: content['mimeType'] as String? ?? 'application/octet-stream',
+        size: size is int ? size : 0,
+        url: content['uri'] as String?,
+      );
+    }
+    if (text.isEmpty && attachment == null) return;
+
+    final index = session.messages.indexWhere(
+      (message) => message.isUser && message.id == messageId,
+    );
+    if (index < 0) {
+      session.addMessage(Message(
+        id: messageId,
+        text: text,
+        isUser: true,
+        timestamp: DateTime.now(),
+        attachments: attachment == null ? const [] : [attachment],
+      ));
+      return;
+    }
+    final old = session.messages[index];
+    session.updateMessage(old.copyWith(
+      text: old.text + text,
+      attachments: attachment == null
+          ? old.attachments
+          : [...old.attachments, attachment],
+    ));
+  }
+
+  void _prepareSessionForReplay(SessionState session) {
+    final oldIds = session.messages.map((message) => message.id).toList();
+    session.messages.clear();
+    session.currentRunId = null;
+    for (final id in oldIds) {
+      _streamText.remove(id);
+      _liveText.remove(id);
+    }
+    _toolCalls.removeWhere(
+      (key, _) => key.startsWith('${session.sessionKey}/'),
+    );
+    _plans.remove(session.sessionKey);
+  }
+
+  Future<void> _loadRemoteSession(String sessionKey) async {
+    final replay = <Map<String, dynamic>>[];
+    _loadReplays[sessionKey] = replay;
+    final additionalDirectories = _additionalDirectoriesFor(sessionKey);
+    Map<String, dynamic> result;
+    try {
+      result = await _request('session/load', {
+        'sessionId': sessionKey,
+        'cwd': workingDirectoryFor(sessionKey),
+        if (additionalDirectories.isNotEmpty)
+          'additionalDirectories': additionalDirectories,
+        'mcpServers': _mcpServersForAgent(),
+      });
+    } finally {
+      _loadReplays.remove(sessionKey);
+    }
+
+    final session =
+        _sessions.putIfAbsent(sessionKey, () => _newSessionState(sessionKey));
+    session.workingDirectory = workingDirectoryFor(sessionKey);
+    session.additionalDirectories = additionalDirectories;
+    final hasHistory = replay.any((params) {
+      final kind = _asMap(params['update'])['sessionUpdate'];
+      return kind == 'user_message_chunk' ||
+          kind == 'agent_message_chunk' ||
+          kind == 'agent_thought_chunk' ||
+          kind == 'tool_call' ||
+          kind == 'tool_call_update' ||
+          kind == 'plan';
+    });
+    if (hasHistory) {
+      final persist = session.persist;
+      final unread = session.unreadCount;
+      final updated = session.lastUpdated;
+      session.persist = false;
+      _prepareSessionForReplay(session);
+      _replayRoles.remove(sessionKey);
+      _replayUserMessages.remove(sessionKey);
+      try {
+        for (final params in replay) {
+          _applySessionUpdate(
+            sessionKey,
+            _asMap(params['update']),
+            replay: true,
+          );
+        }
+      } finally {
+        _replayRoles.remove(sessionKey);
+        _replayUserMessages.remove(sessionKey);
+        session.persist = persist;
+        session.unreadCount = unread;
+        session.lastUpdated = updated;
+        for (final message in session.messages) {
+          _streamText.remove(message.id);
+          _liveText.remove(message.id);
+        }
+        session.currentRunId = null;
+      }
+      if (persist) await SessionStorage.saveSession(session.toChatSession());
+      notifyListeners();
+    }
+    _applySessionMeta(result);
+  }
+
+  void _upsertToolCall(
+    SessionState session,
+    Map<String, dynamic> update, {
+    bool replay = false,
+  }) {
     final toolCallId = update['toolCallId'] as String? ?? _generateId();
     _toolCalls
         .putIfAbsent('${session.sessionKey}/$toolCallId',
@@ -1645,9 +2376,8 @@ class WebSocketService with ChangeNotifier {
         previousLines.isEmpty ? null : previousLines.first.trim();
     final previousDetail =
         previousLines.length > 1 ? previousLines.sublist(1).join('\n') : '';
-    final status = _nonEmpty(update['status']) ??
-        previous?.toolStatus ??
-        'in_progress';
+    final status =
+        _nonEmpty(update['status']) ?? previous?.toolStatus ?? 'in_progress';
     final title = _nonEmpty(update['title']) ??
         _nonEmpty(update['toolName']) ??
         _nonEmpty(update['name']) ??
@@ -1657,13 +2387,19 @@ class WebSocketService with ChangeNotifier {
         '工具调用';
     final detail = _contentToText(update['content']);
     final locations = update['locations'] as List? ?? const [];
-    final locationText = locations.map((item) {
-      final loc = _asMap(item);
-      return loc['path'] as String? ?? '';
-    }).where((path) => path.isNotEmpty).join(', ');
+    final locationText = locations
+        .map((item) {
+          final loc = _asMap(item);
+          return loc['path'] as String? ?? '';
+        })
+        .where((path) => path.isNotEmpty)
+        .join(', ');
     final body = [
       if (locationText.isNotEmpty) locationText,
-      if (detail.isNotEmpty) detail else if (previousDetail.isNotEmpty) previousDetail,
+      if (detail.isNotEmpty)
+        detail
+      else if (previousDetail.isNotEmpty)
+        previousDetail,
     ].join('\n');
     final text = body.isEmpty ? title : '$title\n$body';
     _upsertSpecialMessage(
@@ -1673,8 +2409,9 @@ class WebSocketService with ChangeNotifier {
       text: text,
       toolCallId: toolCallId,
       toolStatus: status,
-      streaming: _promptInFlight &&
-          (status == 'pending' || status == 'in_progress'),
+      streaming:
+          _promptInFlight && (status == 'pending' || status == 'in_progress'),
+      replay: replay,
     );
   }
 
@@ -1701,7 +2438,9 @@ class WebSocketService with ChangeNotifier {
     String? toolStatus,
     bool append = false,
     bool streaming = false,
+    bool replay = false,
   }) {
+    if (replay) streaming = false;
     final index = session.messages.indexWhere((m) => m.id == id);
     if (index >= 0) {
       final old = session.messages[index];
@@ -1733,7 +2472,7 @@ class WebSocketService with ChangeNotifier {
         toolStatus: toolStatus,
       );
       session.addMessage(message);
-      _messageController.add(message);
+      if (!replay) _messageController.add(message);
       if (streaming) _publishLiveText(id, initial);
     }
   }
@@ -1768,6 +2507,7 @@ class WebSocketService with ChangeNotifier {
     String messageId,
     String text, {
     Attachment? attachment,
+    bool replay = false,
   }) {
     if (attachment == null && isLeakedAgentErrorOnly(text)) {
       _sawLeakedStreamError = true;
@@ -1778,8 +2518,8 @@ class WebSocketService with ChangeNotifier {
       final previousIndex =
           session.messages.indexWhere((m) => !m.isUser && m.id == previousId);
       if (previousIndex >= 0 && session.messages[previousIndex].isStreaming) {
-        final settled = session.messages[previousIndex]
-            .copyWith(isStreaming: false);
+        final settled =
+            session.messages[previousIndex].copyWith(isStreaming: false);
         _liveText.remove(previousId);
         _streamText.remove(previousId);
         session.updateMessage(settled);
@@ -1790,9 +2530,9 @@ class WebSocketService with ChangeNotifier {
         session.messages.indexWhere((m) => !m.isUser && m.id == messageId);
     // Keep streaming while chunks are still arriving. After the prompt has
     // settled, a late chunk must not turn the bubble back into "正在回复".
-    final streaming = _promptInFlight ||
-        index < 0 ||
-        session.messages[index].isStreaming;
+    // Replayed history is never live, otherwise it would persist as streaming.
+    final streaming = !replay &&
+        (_promptInFlight || index < 0 || session.messages[index].isStreaming);
     if (index >= 0) {
       final old = session.messages[index];
       final updated = old.copyWith(
@@ -1821,7 +2561,7 @@ class WebSocketService with ChangeNotifier {
         attachments: attachment == null ? const [] : [attachment],
       );
       session.addMessage(message);
-      _messageController.add(message);
+      if (!replay) _messageController.add(message);
       if (streaming) _publishLiveText(messageId, initial);
     }
   }
@@ -1912,6 +2652,7 @@ class WebSocketService with ChangeNotifier {
     final saved = await SessionStorage.loadSession(sessionKey);
     if (saved != null && !_sessions.containsKey(sessionKey)) {
       final state = SessionState.fromChatSession(saved);
+      _restoreSessionFolder(state);
       state.messageUpdateStream.listen(_messageUpdateController.add);
       _sessions[sessionKey] = state;
     }
@@ -1921,9 +2662,19 @@ class WebSocketService with ChangeNotifier {
     for (final saved in await SessionStorage.loadAllSessions()) {
       if (!_sessions.containsKey(saved.key)) {
         final state = SessionState.fromChatSession(saved);
+        _restoreSessionFolder(state);
         state.messageUpdateStream.listen(_messageUpdateController.add);
         _sessions[saved.key] = state;
       }
+    }
+  }
+
+  void _restoreSessionFolder(SessionState session) {
+    final cwd = session.workingDirectory?.trim() ?? '';
+    if (cwd.isNotEmpty) _sessionCwd[session.sessionKey] = cwd;
+    if (session.additionalDirectories.isNotEmpty) {
+      _sessionAdditionalDirs[session.sessionKey] =
+          List.of(session.additionalDirectories);
     }
   }
 
@@ -1940,7 +2691,13 @@ class WebSocketService with ChangeNotifier {
     _todos = const [];
     _currentModeId = null;
     _pendingClientRequest = null;
+    _urlElicitationSessions.clear();
+    for (final active in _terminals.values) {
+      unawaited(active.terminal.release());
+    }
+    _terminals.clear();
     _pendingPermissions.clear();
+    _alwaysAllowedToolKinds.clear();
     _plans.clear();
     _toolCalls.clear();
     notifyListeners();
@@ -2073,4 +2830,11 @@ class _SentPrompt {
   final String userMessageId;
 
   const _SentPrompt(this.requestId, this.sessionKey, this.userMessageId);
+}
+
+class _ActiveTerminal {
+  const _ActiveTerminal(this.sessionId, this.terminal);
+
+  final String sessionId;
+  final AcpTerminal terminal;
 }

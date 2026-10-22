@@ -407,14 +407,28 @@ class ChatSession {
   bool isGatewaySession = false;
   String? lastMessagePreview;
   String? sourceGatewayHost;
+
+  /// Folder the ACP session runs in, as reported by the agent.
+  String? workingDirectory;
+
+  /// Extra workspace roots the agent reported for this session.
+  List<String> additionalDirectories = const [];
   double? scrollOffset;
   String? customTitle; // User-defined title that persists
 
-  // Token usage fields from Gateway
+  /// Title chosen by the agent (session/list or session_info_update).
+  /// Unlike [customTitle] it may be replaced by later agent updates.
+  String? agentTitle;
+
+  // Token usage fields from Gateway or ACP usage_update
   int inputTokens = 0;
   int outputTokens = 0;
   int totalTokens = 0;
   int contextTokens = 0;
+
+  /// Cumulative session cost from ACP usage_update.
+  double? costAmount;
+  String? costCurrency;
   String? model;
 
   ChatSession({
@@ -429,12 +443,17 @@ class ChatSession {
     this.isGatewaySession = false,
     this.lastMessagePreview,
     this.sourceGatewayHost,
+    this.workingDirectory,
+    this.additionalDirectories = const [],
     this.scrollOffset,
     this.customTitle,
+    this.agentTitle,
     this.inputTokens = 0,
     this.outputTokens = 0,
     this.totalTokens = 0,
     this.contextTokens = 0,
+    this.costAmount,
+    this.costCurrency,
     this.model,
   });
 
@@ -485,14 +504,22 @@ class ChatSession {
       isGatewaySession: json['isGatewaySession'] ?? false,
       lastMessagePreview: json['lastMessagePreview'],
       sourceGatewayHost: json['sourceGatewayHost'],
+      workingDirectory: json['workingDirectory'] as String?,
+      additionalDirectories: (json['additionalDirectories'] as List?)
+              ?.whereType<String>()
+              .toList() ??
+          const [],
       scrollOffset: json['scrollOffset'] != null
           ? (json['scrollOffset'] as num).toDouble()
           : null,
       customTitle: json['customTitle'],
+      agentTitle: json['agentTitle'] as String?,
       inputTokens: json['inputTokens'] ?? 0,
       outputTokens: json['outputTokens'] ?? 0,
       totalTokens: json['totalTokens'] ?? 0,
       contextTokens: json['contextTokens'] ?? 0,
+      costAmount: (json['costAmount'] as num?)?.toDouble(),
+      costCurrency: json['costCurrency'] as String?,
       model: json['model'],
     );
   }
@@ -511,12 +538,17 @@ class ChatSession {
       'isGatewaySession': isGatewaySession,
       'lastMessagePreview': lastMessagePreview,
       'sourceGatewayHost': sourceGatewayHost,
+      'workingDirectory': workingDirectory,
+      'additionalDirectories': additionalDirectories,
       'scrollOffset': scrollOffset,
       'customTitle': customTitle,
+      'agentTitle': agentTitle,
       'inputTokens': inputTokens,
       'outputTokens': outputTokens,
       'totalTokens': totalTokens,
       'contextTokens': contextTokens,
+      'costAmount': costAmount,
+      'costCurrency': costCurrency,
       'model': model,
     };
   }
@@ -534,12 +566,17 @@ class ChatSession {
     bool? isGatewaySession,
     String? lastMessagePreview,
     String? sourceGatewayHost,
+    String? workingDirectory,
+    List<String>? additionalDirectories,
     double? scrollOffset,
     String? customTitle,
+    String? agentTitle,
     int? inputTokens,
     int? outputTokens,
     int? totalTokens,
     int? contextTokens,
+    double? costAmount,
+    String? costCurrency,
     String? model,
   }) {
     return ChatSession(
@@ -554,12 +591,18 @@ class ChatSession {
       isGatewaySession: isGatewaySession ?? this.isGatewaySession,
       lastMessagePreview: lastMessagePreview ?? this.lastMessagePreview,
       sourceGatewayHost: sourceGatewayHost ?? this.sourceGatewayHost,
+      workingDirectory: workingDirectory ?? this.workingDirectory,
+      additionalDirectories:
+          additionalDirectories ?? this.additionalDirectories,
       scrollOffset: scrollOffset ?? this.scrollOffset,
       customTitle: customTitle ?? this.customTitle,
+      agentTitle: agentTitle ?? this.agentTitle,
       inputTokens: inputTokens ?? this.inputTokens,
       outputTokens: outputTokens ?? this.outputTokens,
       totalTokens: totalTokens ?? this.totalTokens,
       contextTokens: contextTokens ?? this.contextTokens,
+      costAmount: costAmount ?? this.costAmount,
+      costCurrency: costCurrency ?? this.costCurrency,
       model: model ?? this.model,
     );
   }

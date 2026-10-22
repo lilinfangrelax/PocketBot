@@ -4,6 +4,12 @@ import 'package:pocket_bot/config/session_storage.dart';
 import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/utils/logger.dart';
 
+String _formatTokenCount(int value) {
+  if (value < 1000) return value.toString();
+  final scaled = value / 1000;
+  return '${scaled.toStringAsFixed(value % 1000 == 0 ? 0 : 1)}k';
+}
+
 class SessionState with ChangeNotifier {
   final String sessionKey;
   String? agentId;
@@ -14,9 +20,20 @@ class SessionState with ChangeNotifier {
   int unreadCount;
   bool isGatewaySession;
   String? sourceGatewayHost;
+  String? workingDirectory;
+  List<String> additionalDirectories = const [];
   double? scrollOffset;
-  String? customTitle;  // User-defined title that persists
-  String? model;  // Model name from Gateway
+  String? customTitle; // User-defined title that persists
+  String? agentTitle; // Agent-provided title, replaceable
+  String? model; // Model name from Gateway
+
+  // Token usage reported by the agent (ACP usage_update or Gateway sync).
+  int inputTokens = 0;
+  int outputTokens = 0;
+  int totalTokens = 0;
+  int contextTokens = 0;
+  double? costAmount;
+  String? costCurrency;
 
   /// False for sessions that back a group chat member; they are stored with
   /// the group's messages instead of the chat list.
@@ -27,6 +44,9 @@ class SessionState with ChangeNotifier {
   String get displayTitle {
     if (customTitle != null && customTitle!.isNotEmpty) {
       return customTitle!;
+    }
+    if (agentTitle != null && agentTitle!.isNotEmpty) {
+      return agentTitle!;
     }
 
     if (messages.isEmpty) {
@@ -67,9 +87,18 @@ class SessionState with ChangeNotifier {
     this.unreadCount = 0,
     this.isGatewaySession = false,
     this.sourceGatewayHost,
+    this.workingDirectory,
+    this.additionalDirectories = const [],
     this.scrollOffset,
     this.customTitle,
+    this.agentTitle,
     this.model,
+    this.inputTokens = 0,
+    this.outputTokens = 0,
+    this.totalTokens = 0,
+    this.contextTokens = 0,
+    this.costAmount,
+    this.costCurrency,
   })  : messages = messages ?? [],
         lastUpdated = lastUpdated ?? DateTime.now();
 
@@ -90,7 +119,8 @@ class SessionState with ChangeNotifier {
   }
 
   void addMessage(Message message) {
-    Logger.debug('[Session] addMessage: ${message.id}, isUser: ${message.isUser}');
+    Logger.debug(
+        '[Session] addMessage: ${message.id}, isUser: ${message.isUser}');
     if (messages.any((m) => m.id == message.id)) {
       Logger.warning('[SessionState] 尝试添加重复消息 ID: ${message.id}');
       return;
@@ -107,7 +137,7 @@ class SessionState with ChangeNotifier {
     if (!message.isStreaming) {
       _saveToStorage();
     }
-    
+
     _messageController.add(message);
     notifyListeners();
   }
@@ -164,24 +194,54 @@ class SessionState with ChangeNotifier {
       agentId: agentId,
       unreadCount: unreadCount,
       isGatewaySession: isGatewaySession,
-      lastMessagePreview: messages.isNotEmpty
-          ? messages.last.text
-          : null,
+      lastMessagePreview: messages.isNotEmpty ? messages.last.text : null,
       sourceGatewayHost: sourceGatewayHost,
+      workingDirectory: workingDirectory,
+      additionalDirectories: additionalDirectories,
       scrollOffset: scrollOffset,
       customTitle: customTitle,
-      inputTokens: messages.fold(0, (sum, m) => sum + (m.isUser ? m.text.length : 0)),
-      outputTokens: messages.fold(0, (sum, m) => sum + (m.isUser ? 0 : m.text.length)),
-      totalTokens: messages.fold(0, (sum, m) => sum + m.text.length),
-      contextTokens: 200000, // Default, can be updated from Gateway
+      agentTitle: agentTitle,
+      inputTokens: inputTokens,
+      outputTokens: outputTokens,
+      totalTokens: totalTokens,
+      contextTokens: contextTokens,
+      costAmount: costAmount,
+      costCurrency: costCurrency,
       model: model,
     );
+  }
+
+  /// Compact context usage for the session banner, e.g. `2.7k / 200k`.
+  String? get tokenUsageLabel {
+    if (totalTokens <= 0 || contextTokens <= 0) return null;
+    return '${_formatTokenCount(totalTokens)} / '
+        '${_formatTokenCount(contextTokens)}';
+  }
+
+  /// Cumulative session cost, e.g. `USD 0.12`.
+  String? get costLabel {
+    final amount = costAmount;
+    final currency = costCurrency;
+    if (amount == null || amount <= 0 || currency == null || currency.isEmpty) {
+      return null;
+    }
+    return '$currency ${amount.toStringAsFixed(2)}';
+  }
+
+  /// Combined context/cost label for the chat header.
+  String? get contextUsageLabel {
+    final tokens = tokenUsageLabel;
+    final cost = costLabel;
+    if (tokens == null) return cost;
+    if (cost == null) return tokens;
+    return '$tokens · $cost';
   }
 
   Future<void> _saveToStorage() async {
     if (!persist) return;
     try {
-      Logger.debug('[Session] Saving to storage: ${sessionKey}, ${messages.length} messages');
+      Logger.debug(
+          '[Session] Saving to storage: ${sessionKey}, ${messages.length} messages');
       await SessionStorage.saveSession(toChatSession());
       Logger.debug('[Session] Save complete');
     } catch (e) {
@@ -205,9 +265,18 @@ class SessionState with ChangeNotifier {
       unreadCount: session.unreadCount,
       isGatewaySession: session.isGatewaySession,
       sourceGatewayHost: session.sourceGatewayHost,
+      workingDirectory: session.workingDirectory,
+      additionalDirectories: session.additionalDirectories,
       scrollOffset: session.scrollOffset,
       customTitle: session.customTitle,
+      agentTitle: session.agentTitle,
       model: session.model,
+      inputTokens: session.inputTokens,
+      outputTokens: session.outputTokens,
+      totalTokens: session.totalTokens,
+      contextTokens: session.contextTokens,
+      costAmount: session.costAmount,
+      costCurrency: session.costCurrency,
     );
   }
 }

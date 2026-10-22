@@ -9,6 +9,7 @@ import 'package:pocketbot_remote/pocketbot_remote.dart';
 
 import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/services/acp_file_system.dart';
+import 'package:pocket_bot/services/acp_terminal.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
 import 'package:pocket_bot/services/remote_helper.dart';
 import 'package:pocket_bot/services/ssh_host_keys.dart';
@@ -39,6 +40,10 @@ abstract class AcpTransport {
   /// Files on the agent's machine. Null means the client must not advertise
   /// `fs` capabilities, because it cannot reach the agent's disk.
   AcpFileSystem? get fileSystem => null;
+
+  /// Terminal commands for the agent. Null means the client must not advertise
+  /// `terminal`; commands would otherwise run outside the agent's environment.
+  AcpTerminalHost? get terminalHost => null;
 }
 
 /// Splits stdio ACP traffic into one JSON object per line.
@@ -428,6 +433,7 @@ class LocalStdioTransport implements AcpTransport {
   final SendPort _commandPort;
   final Isolate _isolate;
   final StreamController<dynamic> _incoming;
+  final LocalAcpTerminalHost _terminalHost = LocalAcpTerminalHost();
   bool _closed = false;
 
   static Future<LocalStdioTransport> start(GatewayInfo target) async {
@@ -530,6 +536,9 @@ class LocalStdioTransport implements AcpTransport {
   AcpFileSystem? get fileSystem => const LocalAcpFileSystem();
 
   @override
+  AcpTerminalHost? get terminalHost => _terminalHost;
+
+  @override
   void send(String jsonFrame) {
     try {
       _commandPort.send(<String, dynamic>{
@@ -545,6 +554,7 @@ class LocalStdioTransport implements AcpTransport {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
+    await _terminalHost.dispose();
     try {
       _commandPort.send(const <String, dynamic>{'type': 'close'});
     } catch (_) {}
@@ -740,6 +750,11 @@ class SshStdioTransport implements AcpTransport {
 
   @override
   final AcpFileSystem fileSystem;
+
+  /// The agent runs on the gateway, so a local process would run on the wrong
+  /// machine; no host means the terminal capability is not advertised.
+  @override
+  AcpTerminalHost? get terminalHost => null;
 
   static Future<SshStdioTransport> start(GatewayInfo target) async {
     final client = await openSshClient(target);
@@ -944,6 +959,11 @@ class WebSocketAcpTransport implements AcpTransport {
 
   @override
   AcpFileSystem? get fileSystem => null;
+
+  /// The agent is behind the remote WebSocket server, so terminal commands
+  /// cannot target its environment from here.
+  @override
+  AcpTerminalHost? get terminalHost => null;
 
   @override
   void send(String jsonFrame) {

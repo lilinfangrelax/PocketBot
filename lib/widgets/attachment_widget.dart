@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:pocket_bot/models/attachment.dart';
 import 'package:pocket_bot/services/file_download_service.dart';
@@ -27,8 +28,10 @@ class AttachmentWidget extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
       decoration: BoxDecoration(
-        color: isUser 
-            ? (isDarkMode ? Colors.white.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.2))
+        color: isUser
+            ? (isDarkMode
+                ? Colors.white.withValues(alpha: 0.15)
+                : Colors.white.withValues(alpha: 0.2))
             : (isDarkMode ? const Color(0xFF3A3A3A) : Colors.grey[100]),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -40,12 +43,7 @@ class AttachmentWidget extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // File icon
-              Icon(
-                _getIcon(),
-                size: 32,
-                color: isUser ? Colors.white : (isDarkMode ? Colors.grey[300] : Colors.grey[700]),
-              ),
+              _buildPreview(),
               const SizedBox(width: 12),
               // File info
               Flexible(
@@ -58,7 +56,9 @@ class AttachmentWidget extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
-                        color: isUser ? Colors.white : (isDarkMode ? Colors.white : Colors.black87),
+                        color: isUser
+                            ? Colors.white
+                            : (isDarkMode ? Colors.white : Colors.black87),
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -67,7 +67,11 @@ class AttachmentWidget extends StatelessWidget {
                       '${attachment.sizeString} • ${attachment.mimeType.split('/').last.toUpperCase()}',
                       style: TextStyle(
                         fontSize: 11,
-                        color: isUser ? Colors.white70 : (isDarkMode ? Colors.grey[400] : Colors.grey[600]),
+                        color: isUser
+                            ? Colors.white70
+                            : (isDarkMode
+                                ? Colors.grey[400]
+                                : Colors.grey[600]),
                       ),
                     ),
                   ],
@@ -86,7 +90,8 @@ class AttachmentWidget extends StatelessWidget {
                   constraints: const BoxConstraints(),
                 ),
               // Download indicator (for received attachments)
-              if (!isUser && (attachment.url != null || attachment.data != null))
+              if (!isUser &&
+                  (attachment.url != null || attachment.data != null))
                 const SizedBox(width: 8),
             ],
           ),
@@ -117,7 +122,7 @@ class AttachmentWidget extends StatelessWidget {
 
     // Hide loading indicator
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    
+
     if (filePath != null) {
       // Show success and open option
       ScaffoldMessenger.of(context).showSnackBar(
@@ -141,14 +146,50 @@ class AttachmentWidget extends StatelessWidget {
     }
   }
 
+  Widget _buildPreview() {
+    final data = attachment.data;
+    if (attachment.isImage && data != null && data.isNotEmpty) {
+      try {
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.memory(
+            base64Decode(data),
+            width: 44,
+            height: 44,
+            fit: BoxFit.cover,
+            cacheWidth: 88,
+            gaplessPlayback: true,
+            errorBuilder: (context, error, stackTrace) => _buildIcon(),
+          ),
+        );
+      } on FormatException {
+        // Fall through to the generic file icon.
+      }
+    }
+    return _buildIcon();
+  }
+
+  Widget _buildIcon() {
+    return Icon(
+      _getIcon(),
+      size: 32,
+      color: isUser
+          ? Colors.white
+          : (isDarkMode ? Colors.grey[300] : Colors.grey[700]),
+    );
+  }
+
   IconData _getIcon() {
     if (attachment.isImage) return Icons.image;
     if (attachment.isPdf) return Icons.picture_as_pdf;
     if (attachment.isVideo) return Icons.videocam;
     if (attachment.isAudio) return Icons.audiotrack;
-    if (attachment.filename.endsWith('.zip') || attachment.filename.endsWith('.rar')) return Icons.archive;
-    if (attachment.filename.endsWith('.doc') || attachment.filename.endsWith('.docx')) return Icons.description;
-    if (attachment.filename.endsWith('.xls') || attachment.filename.endsWith('.xlsx')) return Icons.table_chart;
+    if (attachment.filename.endsWith('.zip') ||
+        attachment.filename.endsWith('.rar')) return Icons.archive;
+    if (attachment.filename.endsWith('.doc') ||
+        attachment.filename.endsWith('.docx')) return Icons.description;
+    if (attachment.filename.endsWith('.xls') ||
+        attachment.filename.endsWith('.xlsx')) return Icons.table_chart;
     return Icons.insert_drive_file;
   }
 }
