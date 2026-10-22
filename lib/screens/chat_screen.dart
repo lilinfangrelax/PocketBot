@@ -279,7 +279,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         SizedBox(
-                          width: 12,
+                          width: 18,
                           height: 12,
                           child: AnimatedTypingDots(),
                         ),
@@ -541,9 +541,7 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('无法设置 ${option.name}：$error')),
-      );
+      showAppNotice(context, '无法设置 ${option.name}：$error');
     }
   }
 
@@ -1670,9 +1668,7 @@ class _ChatScreenState extends State<ChatScreen> {
         Logger.error('[UI] wsService is null!');
         if (mounted) {
           _controller.text = text;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('发送失败：未连接到 Agent')),
-          );
+          showAppNotice(context, '发送失败：未连接到 Agent');
         }
         return;
       }
@@ -1692,9 +1688,7 @@ class _ChatScreenState extends State<ChatScreen> {
       if (mounted) {
         _controller.text = text;
         setState(() => _isGenerating = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('发送失败：$e')),
-        );
+        showAppNotice(context, '发送失败：$e');
       }
     }
   }

@@ -1,4 +1,4 @@
-import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:pocket_bot/models/ai_contact_config.dart';
 import 'package:pocket_bot/models/contact_session_mapping.dart';
 import 'package:pocket_bot/models/contact.dart';
@@ -19,6 +19,13 @@ class AIContactService {
   static Future<void>? _ready;
 
   Future<void> _ensureTables() => _ready ??= initTables();
+
+  /// Drops the cached table-initialization future so a recreated database is
+  /// initialized again. E2E tests delete the database between scenarios.
+  @visibleForTesting
+  static void resetTableCache() {
+    _ready = null;
+  }
 
   /// 初始化数据库表
   Future<void> initTables() async {

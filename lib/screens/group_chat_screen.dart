@@ -307,6 +307,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                   border: Border.all(color: colors.strokeStrong),
                 ),
                 child: TextField(
+                  key: const ValueKey('group-chat-input'),
                   controller: _messageController,
                   decoration: InputDecoration(
                     hintText: '@名称 让代理回复',
@@ -335,6 +336,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             const SizedBox(width: 4),
             // 发送/更多按钮
             IconButton(
+              key: const ValueKey('group-chat-send'),
               onPressed: _messageController.text.trim().isEmpty
                   ? null // TODO: 展开更多菜单
                   : _isSending

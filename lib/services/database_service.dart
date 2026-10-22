@@ -644,7 +644,8 @@ class DatabaseService {
 
   /// 关闭数据库
   Future<void> close() async {
-    final db = await database;
+    final db = _database;
+    if (db == null) return;
     await db.close();
     _database = null;
   }

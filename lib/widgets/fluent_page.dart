@@ -28,6 +28,7 @@ class FluentScreen extends StatelessWidget {
       header: FluentPageHeader(
         leading: canPop
             ? IconButton(
+                key: const ValueKey('screen-back'),
                 icon: const Icon(WindowsIcons.back),
                 onPressed: () => Navigator.of(context).maybePop(),
               )

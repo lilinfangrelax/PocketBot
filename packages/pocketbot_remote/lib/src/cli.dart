@@ -222,7 +222,7 @@ Future<List<String>> _install(RemoteRunOptions options) {
   ).then((cached) => cached.argv);
 }
 
-Future<List<int>> _download(Uri url) async {
+Future<void> _download(Uri url, File destination) async {
   final client = HttpClient();
   try {
     final request = await client.getUrl(url);
@@ -230,13 +230,15 @@ Future<List<int>> _download(Uri url) async {
     if (response.statusCode != 200) {
       throw Exception('HTTP ${response.statusCode} for $url');
     }
-    final builder = BytesBuilder(copy: false);
-    await for (final chunk in response) {
-      builder.add(chunk);
+    final sink = destination.openWrite();
+    try {
+      await response.forEach(sink.add);
+      await sink.flush();
+    } finally {
+      await sink.close();
     }
-    return builder.takeBytes();
   } finally {
-    client.close();
+    client.close(force: true);
   }
 }
 
@@ -316,7 +318,9 @@ Future<bool> _ping(DaemonEndpoint endpoint) async {
         .timeout(const Duration(milliseconds: 400));
     await socket.close();
     final reply = jsonDecode(line);
-    return reply is Map && reply['ok'] == true && reply['version'] == endpoint.version;
+    return reply is Map &&
+        reply['ok'] == true &&
+        reply['version'] == endpoint.version;
   } catch (_) {
     return false;
   }

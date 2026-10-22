@@ -50,7 +50,11 @@ class SessionItem {
 }
 
 class WeChatSessionList extends StatefulWidget {
-  const WeChatSessionList({super.key});
+  const WeChatSessionList({super.key, this.refreshToken = 0});
+
+  /// Bumped by the shell when this tab becomes visible, so sessions created
+  /// from other tabs show up without waiting for a WebSocket notification.
+  final int refreshToken;
 
   @override
   State<WeChatSessionList> createState() => _WeChatSessionListState();
@@ -72,6 +76,14 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
     super.initState();
     _loadSessions();
     _listenToSessionChanges();
+  }
+
+  @override
+  void didUpdateWidget(WeChatSessionList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.refreshToken != oldWidget.refreshToken) {
+      _loadSessions();
+    }
   }
 
   void _listenToSessionChanges() {

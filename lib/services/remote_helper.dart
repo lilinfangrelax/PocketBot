@@ -257,6 +257,20 @@ Future<List<int>> downloadReleaseAsset(Uri url) async {
   return bytes;
 }
 
+Future<void> downloadReleaseAssetToFile(Uri url, File destination) async {
+  final response = await Dio().download(
+    url.toString(),
+    destination.path,
+    options: Options(
+      followRedirects: true,
+      receiveTimeout: const Duration(minutes: 2),
+    ),
+  );
+  if (response.statusCode != 200) {
+    throw Exception('HELPER_INSTALL_FAILED:下载远程服务失败 (${response.statusCode})');
+  }
+}
+
 /// SSH exec that returns stdout. A non-zero exit with empty stdout throws.
 Future<String> execRemote(SSHClient client, String command) async {
   final session = await client.execute(command);

@@ -141,7 +141,7 @@ void main() {
       sha256: null,
       command: './bin/tool',
       args: const ['acp'],
-      download: (_) async => zip,
+      download: (_, destination) async => destination.writeAsBytes(zip),
     );
     expect(File(first.argv.first).readAsStringSync(), 'hello');
 
@@ -153,7 +153,7 @@ void main() {
       sha256: null,
       command: './bin/tool',
       args: const ['acp'],
-      download: (_) async => throw Exception('should not download'),
+      download: (_, __) async => throw Exception('should not download'),
     );
     expect(second.argv, first.argv);
   });
@@ -161,7 +161,8 @@ void main() {
   test('rejects an archive whose sha256 does not match', () async {
     final root = await Directory.systemTemp.createTemp('pocketbot-agent');
     addTearDown(() => root.delete(recursive: true));
-    final zip = _zip(Archive()..addFile(ArchiveFile('bin/tool', 2, utf8.encode('ok'))));
+    final zip =
+        _zip(Archive()..addFile(ArchiveFile('bin/tool', 2, utf8.encode('ok'))));
     expect(
       ensureCachedAgent(
         root: root,
@@ -171,7 +172,7 @@ void main() {
         sha256: '0' * 64,
         command: './bin/tool',
         args: const ['acp'],
-        download: (_) async => zip,
+        download: (_, destination) async => destination.writeAsBytes(zip),
       ),
       throwsA(predicate((error) => '$error'.contains('sha256 mismatch'))),
     );
@@ -191,13 +192,52 @@ void main() {
       sha256: crypto.sha256.convert(zip).toString(),
       command: './bin/tool',
       args: const ['acp'],
-      download: (_) async => zip,
+      download: (_, destination) async => destination.writeAsBytes(zip),
     );
     expect(File(cached.argv.first).readAsStringSync(), 'ok');
     expect(File('${root.path}/agents/tool/outside.txt').existsSync(), isFalse);
   });
 
-  test('failed archive download can fall back to an installed command', () async {
+  test('extracts a tar.gz archive entry by entry', () async {
+    final root = await Directory.systemTemp.createTemp('pocketbot-agent');
+    addTearDown(() => root.delete(recursive: true));
+    final archive = Archive()
+      ..addFile(ArchiveFile('../outside.txt', 3, utf8.encode('bad')))
+      ..addFile(
+        ArchiveFile('dist-package/agent', 5, utf8.encode('hello'))
+          ..mode = 0x1ed,
+      )
+      ..addFile(ArchiveFile('dist-package/notes.txt', 4, utf8.encode('note')));
+    final tar = TarEncoder().encode(archive);
+    final gz = GZipEncoder().encode(tar)!;
+
+    final cached = await ensureCachedAgent(
+      root: root,
+      agentId: 'cursor',
+      version: '2',
+      archiveUrl: 'https://example.com/agent.tar.gz?token=1',
+      sha256: crypto.sha256.convert(gz).toString(),
+      command: './dist-package/agent',
+      args: const ['acp'],
+      download: (_, destination) async => destination.writeAsBytes(gz),
+    );
+    expect(File(cached.argv.first).readAsStringSync(), 'hello');
+    expect(cached.argv.skip(1), ['acp']);
+    expect(
+      File('${root.path}/agents/cursor/2/dist-package/notes.txt')
+          .readAsStringSync(),
+      'note',
+    );
+    expect(
+        File('${root.path}/agents/cursor/outside.txt').existsSync(), isFalse);
+    expect(File('${root.path}/agents/cursor/2.download').existsSync(), isFalse);
+    if (!Platform.isWindows) {
+      expect(File(cached.argv.first).statSync().mode & 0x49, isNot(0));
+    }
+  });
+
+  test('failed archive download can fall back to an installed command',
+      () async {
     final argv = await resolveLaunchArgv(
       argv: const ['acp'],
       archiveUrl: 'https://example.com/missing.tar.gz',
@@ -215,7 +255,8 @@ void main() {
     );
   });
 
-  test('daemon rejects a bad token and forwards the launch environment', () async {
+  test('daemon rejects a bad token and forwards the launch environment',
+      () async {
     final launches = <AgentLaunch>[];
     final daemon = await RemoteDaemon.start(
       version: 'test',
@@ -294,7 +335,8 @@ Future<Map<String, dynamic>> _handshake(
   RemoteDaemon daemon, {
   required String token,
 }) async {
-  final socket = await Socket.connect(InternetAddress.loopbackIPv4, daemon.port);
+  final socket =
+      await Socket.connect(InternetAddress.loopbackIPv4, daemon.port);
   socket.write('${jsonEncode({'token': token, 'op': 'attach'})}\n');
   final line = await socket
       .cast<List<int>>()
@@ -332,7 +374,8 @@ class _Attached {
   final bool resumed;
   final Stream<List<int>> _chunks;
 
-  Future<List<int>> nextChunk() => _chunks.first.timeout(const Duration(seconds: 2));
+  Future<List<int>> nextChunk() =>
+      _chunks.first.timeout(const Duration(seconds: 2));
   Future<void> close() => socket.close();
 }
 
@@ -343,7 +386,8 @@ Future<_Attached> _attach(
   bool fresh = false,
   Map<String, String> env = const {},
 }) async {
-  final socket = await Socket.connect(InternetAddress.loopbackIPv4, daemon.port);
+  final socket =
+      await Socket.connect(InternetAddress.loopbackIPv4, daemon.port);
   socket.write('${jsonEncode({
         'token': 'secret',
         'op': 'attach',

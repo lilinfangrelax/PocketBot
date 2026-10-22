@@ -4,12 +4,15 @@ import 'dart:io';
 
 /// Deterministic ACP agent used by PocketBot E2E tests.
 ///
-/// Speaks newline-delimited JSON-RPC 2.0 over stdin/stdout. Every prompt is
-/// answered with `MOCK_AGENT_OK: <prompt text>` split into a few streamed
-/// chunks so the client's streaming path is exercised.
+/// Speaks newline-delimited JSON-RPC 2.0 over stdin/stdout. Ordinary prompts
+/// stream `MOCK_AGENT_OK: <prompt text>`; special prompts exercise slow
+/// streaming, cancellation, markdown and permission-gated tool calls.
 Future<void> main(List<String> args) async {
   var sessionCounter = 0;
   var messageCounter = 0;
+  var requestCounter = 0;
+  final pendingClientResponses = <String, Completer<Map<String, dynamic>>>{};
+  final activePrompts = <String, _ActivePrompt>{};
 
   void send(Map<String, Object?> payload) {
     stdout.writeln(jsonEncode(payload));
@@ -27,6 +30,178 @@ Future<void> main(List<String> args) async {
     });
   }
 
+  Map<String, Object?> sessionInfo(String sessionId) => {
+        'sessionId': sessionId,
+        'modes': {
+          'availableModes': <Object?>[],
+          'currentModeId': 'agent',
+        },
+      };
+
+  Future<void> sendUpdate(
+    String sessionId,
+    Map<String, Object?> update,
+  ) async {
+    send({
+      'jsonrpc': '2.0',
+      'method': 'session/update',
+      'params': {'sessionId': sessionId, 'update': update},
+    });
+    await stdout.flush();
+  }
+
+  Future<void> sendChunk(
+    String sessionId,
+    String messageId,
+    String text,
+  ) async {
+    await sendUpdate(sessionId, {
+      'sessionUpdate': 'agent_message_chunk',
+      'messageId': messageId,
+      'content': {'type': 'text', 'text': text},
+    });
+  }
+
+  Future<Map<String, dynamic>> askPermission(
+    String sessionId,
+    String toolCallId,
+  ) async {
+    requestCounter += 1;
+    final id = 'mock-permission-$requestCounter';
+    final completer = Completer<Map<String, dynamic>>();
+    pendingClientResponses[id] = completer;
+    send({
+      'jsonrpc': '2.0',
+      'id': id,
+      'method': 'session/request_permission',
+      'params': {
+        'sessionId': sessionId,
+        'toolCall': {
+          'toolCallId': toolCallId,
+          'title': '运行 E2E 命令',
+          'kind': 'execute',
+          'status': 'pending',
+          'rawInput': {'command': 'echo e2e'},
+        },
+        'options': [
+          {
+            'optionId': 'allow_once',
+            'name': '允许一次',
+            'kind': 'allow_once',
+          },
+          {
+            'optionId': 'reject_once',
+            'name': '拒绝',
+            'kind': 'reject_once',
+          },
+        ],
+      },
+    });
+    await stdout.flush();
+    return completer.future;
+  }
+
+  Future<void> handlePrompt(
+    Object? id,
+    String sessionId,
+    String promptText,
+    _ActivePrompt active,
+  ) async {
+    messageCounter += 1;
+    final messageId = 'mock-message-$messageCounter';
+    try {
+      switch (promptText) {
+        case 'e2e-stream':
+          await sendChunk(sessionId, messageId, 'MOCK_STREAM:1 ');
+          await Future<void>.delayed(const Duration(milliseconds: 900));
+          await sendChunk(sessionId, messageId, 'MOCK_STREAM:2 ');
+          await Future<void>.delayed(const Duration(milliseconds: 900));
+          await sendChunk(sessionId, messageId, 'MOCK_STREAM:3');
+          respond(id, {'stopReason': 'end_turn'});
+          return;
+        case 'e2e-slow':
+          await sendChunk(sessionId, messageId, 'MOCK_SLOW:1 ');
+          final cancelled = await active.cancelled.future.timeout(
+            const Duration(seconds: 30),
+            onTimeout: () => false,
+          );
+          if (cancelled) {
+            respond(id, {'stopReason': 'cancelled'});
+            return;
+          }
+          await sendChunk(sessionId, messageId, 'MOCK_SLOW:2');
+          respond(id, {'stopReason': 'end_turn'});
+          return;
+        case 'e2e-markdown':
+          await sendChunk(
+            sessionId,
+            messageId,
+            '**E2E Markdown**\n\n```dart\nprint(\'hello\');\n```',
+          );
+          respond(id, {'stopReason': 'end_turn'});
+          return;
+        case 'e2e-tool':
+          final toolCallId = 'mock-tool-$messageCounter';
+          await sendUpdate(sessionId, {
+            'sessionUpdate': 'tool_call',
+            'toolCallId': toolCallId,
+            'title': '运行 E2E 命令',
+            'kind': 'execute',
+            'status': 'pending',
+            'rawInput': {'command': 'echo e2e'},
+          });
+          final result = await askPermission(sessionId, toolCallId);
+          if (active.cancelled.isCompleted) {
+            respond(id, {'stopReason': 'cancelled'});
+            return;
+          }
+          final outcome = (result['outcome'] as Map?)?.cast<String, dynamic>() ??
+              const <String, dynamic>{};
+          final optionId = outcome['optionId'] as String?;
+          final allowed = optionId == 'allow_once';
+          await sendUpdate(sessionId, {
+            'sessionUpdate': 'tool_call_update',
+            'toolCallId': toolCallId,
+            'status': allowed ? 'completed' : 'failed',
+            'content': [
+              {
+                'type': 'content',
+                'content': {
+                  'type': 'text',
+                  'text': allowed ? 'E2E_TOOL_OK' : 'E2E_TOOL_REJECTED',
+                },
+              },
+            ],
+          });
+          await sendChunk(
+            sessionId,
+            messageId,
+            allowed
+                ? 'MOCK_TOOL_ALLOWED: $promptText'
+                : 'MOCK_TOOL_DENIED: $promptText',
+          );
+          respond(id, {'stopReason': 'end_turn'});
+          return;
+        default:
+          final reply = 'MOCK_AGENT_OK: $promptText';
+          final third = (reply.length / 3).ceil();
+          final chunks = <String>[
+            if (reply.isNotEmpty)
+              reply.substring(0, third.clamp(0, reply.length)),
+            if (reply.length > third)
+              reply.substring(third, (third * 2).clamp(0, reply.length)),
+            if (reply.length > third * 2) reply.substring(third * 2),
+          ];
+          for (final chunk in chunks) {
+            await sendChunk(sessionId, messageId, chunk);
+          }
+          respond(id, {'stopReason': 'end_turn'});
+      }
+    } finally {
+      activePrompts.remove(sessionId);
+    }
+  }
+
   final lines = stdin.transform(utf8.decoder).transform(const LineSplitter());
 
   await for (final line in lines) {
@@ -41,7 +216,17 @@ Future<void> main(List<String> args) async {
     }
 
     final method = message['method'] as String?;
-    if (method == null) continue;
+    if (method == null) {
+      final id = message['id']?.toString();
+      final completer = id == null ? null : pendingClientResponses.remove(id);
+      if (completer != null && !completer.isCompleted) {
+        completer.complete(
+          (message['result'] as Map?)?.cast<String, dynamic>() ??
+              const <String, dynamic>{},
+        );
+      }
+      continue;
+    }
     final id = message['id'];
     final params = (message['params'] as Map?)?.cast<String, dynamic>() ??
         const <String, dynamic>{};
@@ -52,7 +237,7 @@ Future<void> main(List<String> args) async {
           'protocolVersion': 1,
           'agentCapabilities': {
             'loadSession': false,
-            'sessionCapabilities': <String, Object?>{},
+            'sessionCapabilities': {'resume': <String, Object?>{}},
             'promptCapabilities': {
               'image': false,
               'audio': false,
@@ -69,16 +254,13 @@ Future<void> main(List<String> args) async {
         break;
       case 'session/new':
         sessionCounter += 1;
-        respond(id, {
-          'sessionId': 'mock-session-$sessionCounter',
-          'modes': {
-            'availableModes': <Object?>[],
-            'currentModeId': 'agent',
-          },
-        });
+        respond(id, sessionInfo('mock-session-$sessionCounter'));
+        break;
+      case 'session/resume':
+      case 'session/load':
+        respond(id, sessionInfo(params['sessionId'] as String? ?? ''));
         break;
       case 'session/prompt':
-        messageCounter += 1;
         final sessionId = params['sessionId'] as String? ?? '';
         final blocks = params['prompt'] as List? ?? const [];
         final promptText = blocks
@@ -86,34 +268,13 @@ Future<void> main(List<String> args) async {
             .where((block) => block['type'] == 'text')
             .map((block) => '${block['text'] ?? ''}')
             .join('\n');
-        final reply = 'MOCK_AGENT_OK: $promptText';
-        final messageId = 'mock-message-$messageCounter';
-        final third = (reply.length / 3).ceil();
-        final chunks = <String>[
-          if (reply.isNotEmpty)
-            reply.substring(0, third.clamp(0, reply.length)),
-          if (reply.length > third)
-            reply.substring(third, (third * 2).clamp(0, reply.length)),
-          if (reply.length > third * 2) reply.substring(third * 2),
-        ];
-        for (final chunk in chunks) {
-          send({
-            'jsonrpc': '2.0',
-            'method': 'session/update',
-            'params': {
-              'sessionId': sessionId,
-              'update': {
-                'sessionUpdate': 'agent_message_chunk',
-                'messageId': messageId,
-                'content': {'type': 'text', 'text': chunk},
-              },
-            },
-          });
-          await stdout.flush();
-        }
-        respond(id, {'stopReason': 'end_turn'});
+        final active = _ActivePrompt(sessionId);
+        activePrompts[sessionId] = active;
+        unawaited(handlePrompt(id, sessionId, promptText, active));
         break;
       case 'session/cancel':
+        final sessionId = params['sessionId'] as String?;
+        if (sessionId != null) activePrompts[sessionId]?.cancel();
         break;
       default:
         if (id != null) {
@@ -123,4 +284,15 @@ Future<void> main(List<String> args) async {
   }
   await stdout.flush();
   exit(0);
+}
+
+class _ActivePrompt {
+  _ActivePrompt(this.sessionId);
+
+  final String sessionId;
+  final Completer<bool> cancelled = Completer<bool>();
+
+  void cancel() {
+    if (!cancelled.isCompleted) cancelled.complete(true);
+  }
 }

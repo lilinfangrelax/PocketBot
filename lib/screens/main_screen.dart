@@ -16,14 +16,7 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   late int _currentIndex = widget.initialIndex;
-
-  // IndexedStack keeps each tab alive across tab changes.
-  final List<Widget> _pages = const [
-    WeChatSessionList(),
-    ContactsScreen(),
-    HomeScreen(),
-    SettingsScreen(),
-  ];
+  int _sessionListRefreshToken = 0;
 
   static const _tabs = [
     FluentTab(icon: WindowsIcons.chat_bubbles, label: '消息'),
@@ -34,6 +27,13 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // IndexedStack keeps each tab alive across tab changes.
+    final pages = [
+      WeChatSessionList(refreshToken: _sessionListRefreshToken),
+      const ContactsScreen(),
+      const HomeScreen(),
+      const SettingsScreen(),
+    ];
     return ColoredBox(
       color: FluentTheme.of(context).scaffoldBackgroundColor,
       child: Column(
@@ -44,14 +44,19 @@ class _MainScreenState extends State<MainScreen> {
               child: IndexedStack(
                 key: const ValueKey('pocketbot-tabs'),
                 index: _currentIndex,
-                children: _pages,
+                children: pages,
               ),
             ),
           ),
           FluentTabBar(
             tabs: _tabs,
             selected: _currentIndex,
-            onChanged: (index) => setState(() => _currentIndex = index),
+            onChanged: (index) => setState(() {
+              if (index == 0 && _currentIndex != 0) {
+                _sessionListRefreshToken++;
+              }
+              _currentIndex = index;
+            }),
           ),
         ],
       ),

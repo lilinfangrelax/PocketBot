@@ -578,7 +578,7 @@ Future<_LocalLaunch> _localLaunch(GatewayInfo target) async {
         sha256: target.archiveSha256,
         command: target.command,
         args: target.args,
-        download: downloadReleaseAsset,
+        download: downloadReleaseAssetToFile,
       );
       return _launchFromArgv(cached.argv);
     } catch (error) {
