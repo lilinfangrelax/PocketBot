@@ -19,6 +19,7 @@ import 'package:pocket_bot/utils/debug_log.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/utils/version_utils.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
+import 'package:pocket_bot/widgets/elicitation_dialog.dart';
 import 'package:pocket_bot/widgets/host_key_dialog.dart';
 import 'package:pocket_bot/widgets/update_settings_card.dart';
 
@@ -50,6 +51,7 @@ Future<void> main() async {
       '${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
   await UpdateConfig.load();
   SshHostKeys.prompt = hostKeyPromptFor(appNavigatorKey);
+  WebSocketService.clientRequestPresenter = _presentClientRequest;
 
   _initNotifications();
   _scheduleUpdateCheck();
@@ -72,6 +74,29 @@ Future<void> main() async {
       child: const PocketBotApp(),
     ),
   );
+}
+
+/// Codex device-code login arrives during connect, before the chat screen
+/// exists. Show it on the root navigator instead of cancelling.
+Future<Map<String, dynamic>>? _presentClientRequest(
+  Map<String, dynamic> request,
+) {
+  if (request['method'] != 'elicitation/create') return null;
+  return _showElicitation(request);
+}
+
+Future<Map<String, dynamic>> _showElicitation(
+  Map<String, dynamic> request,
+) async {
+  final context = appNavigatorKey.currentContext;
+  if (context == null || !context.mounted) {
+    return const {'action': 'cancel'};
+  }
+  final raw = request['params'];
+  final params = raw is Map
+      ? Map<String, dynamic>.from(raw)
+      : const <String, dynamic>{};
+  return showElicitationDialog(context, params);
 }
 
 void _installErrorHandlers() {

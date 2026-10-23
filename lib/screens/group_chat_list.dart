@@ -4,6 +4,7 @@ import 'package:pocket_bot/theme/fluent_theme.dart';
 import 'package:pocket_bot/widgets/fluent_page.dart';
 import 'package:pocket_bot/models/group_chat.dart';
 import 'package:pocket_bot/services/group_chat_service.dart';
+import 'package:pocket_bot/screens/create_group_screen.dart';
 import 'package:pocket_bot/screens/group_chat_screen.dart';
 
 /// 群聊列表页面
@@ -46,9 +47,15 @@ class _GroupChatListScreenState extends State<GroupChatListScreen> {
   Widget build(BuildContext context) {
     return FluentScreen(
       title: const Text('群聊'),
-      commands: fluent.IconButton(
-        icon: const Icon(fluent.WindowsIcons.add),
-        onPressed: _showCreateGroupDialog,
+      commands: Semantics(
+        button: true,
+        label: '创建群聊',
+        onTap: _openCreateGroup,
+        excludeSemantics: true,
+        child: fluent.IconButton(
+          icon: const Icon(fluent.WindowsIcons.add),
+          onPressed: _openCreateGroup,
+        ),
       ),
       content: _isLoading
           ? const Center(child: fluent.ProgressRing())
@@ -68,7 +75,7 @@ class _GroupChatListScreenState extends State<GroupChatListScreen> {
           Text('暂无群聊', style: TextStyle(color: Colors.grey[600])),
           const SizedBox(height: 8),
           fluent.FilledButton(
-            onPressed: _showCreateGroupDialog,
+            onPressed: _openCreateGroup,
             child: const Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -124,21 +131,13 @@ class _GroupChatListScreenState extends State<GroupChatListScreen> {
     }
   }
 
-  void _showCreateGroupDialog() {
-    // TODO: 显示创建群聊对话框
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('创建群聊'),
-        content: const Text('创建群聊功能开发中...'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('知道了'),
-          ),
-        ],
-      ),
-    );
+  void _openCreateGroup() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const CreateGroupScreen()),
+    ).then((_) {
+      if (mounted) _loadGroups();
+    });
   }
 }
 

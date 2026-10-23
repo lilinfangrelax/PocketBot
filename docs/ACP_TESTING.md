@@ -11,7 +11,7 @@ PocketBot talks to ACP agents with JSON-RPC 2.0.
 ## Minimum flow
 
 1. PocketBot sends `initialize` with `protocolVersion: 1`.
-2. The agent returns ACP v1 capabilities. If `authMethods` is non-empty, PocketBot sends `authenticate`.
+2. The agent returns ACP v1 capabilities. If `authMethods` is non-empty, PocketBot sends `authenticate`. Codex advertises API-key auth first; when that call reports that `CODEX_API_KEY` and `OPENAI_API_KEY` are unset, PocketBot continues with ChatGPT device-code login (or browser login when device code is not offered).
 3. PocketBot sends `session/new` with an absolute `cwd` and an empty `mcpServers` list.
 4. The agent returns a `sessionId`.
 5. PocketBot sends `session/prompt` with ACP content blocks.
@@ -28,7 +28,7 @@ Agent-initiated `elicitation/create` requests are answered with `action: accept 
 
 - **Form mode** renders the flat JSON Schema (`string` with `enum`/`oneOf`, `number`, `integer`, `boolean`, and arrays with `minItems`/`maxItems`) in a dialog and returns typed `content`.
 - **URL mode** shows the target host and the full URL, requires explicit consent, then opens it in the system browser. A following `elicitation/complete` notification adds a system notice to the session.
-- Without an attached chat UI PocketBot replies `cancel`; unsupported or malformed modes get JSON-RPC error `-32602`.
+- Without an attached chat UI, PocketBot shows the elicitation on the app navigator. If that navigator is not available it replies `cancel`. Unsupported or malformed modes get JSON-RPC error `-32602`.
 
 ### Terminal
 

@@ -22,6 +22,12 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 enum ConnectionState { disconnected, connecting, connected, error }
 
+/// Answers an agent request that arrived before a chat screen is listening.
+/// Return null to keep the default cancel result.
+typedef ClientRequestPresenter = Future<Map<String, dynamic>>? Function(
+  Map<String, dynamic> request,
+);
+
 class AcpSessionMode {
   final String id;
   final String name;
@@ -306,6 +312,10 @@ class WebSocketService with ChangeNotifier {
   bool _autoApprovePermissions = false;
   final _clientRequestController =
       StreamController<Map<String, dynamic>>.broadcast();
+
+  /// Used when [clientRequests] has no listener, so login can finish before
+  /// the chat screen exists.
+  static ClientRequestPresenter? clientRequestPresenter;
 
   final Map<String, SessionState> _sessions = {};
   final Set<String> _attachedSessions = {};
@@ -793,23 +803,89 @@ class WebSocketService with ChangeNotifier {
       return;
     }
 
+    if (methods.any((method) => method['id'] == 'cursor_login')) {
+      await _authenticateWith('cursor_login');
+      return;
+    }
+    // Codex lists API-key auth first. Calling it with no key fails the whole
+    // connection even when the machine already has a ChatGPT login.
+    if (methods.any(_isCodexApiKeyMethod) &&
+        methods.any(_isCodexLoginMethod)) {
+      await _authenticateCodex(methods);
+      return;
+    }
+
     String? methodId;
     for (final method in methods) {
       final id = method['id'] as String? ?? '';
       if (id.isEmpty) continue;
-      if (id == 'cursor_login') {
-        methodId = id;
-        break;
-      }
-      methodId ??= id;
+      methodId = id;
+      break;
     }
     if (methodId == null) return;
+    await _authenticateWith(methodId);
+  }
+
+  Future<void> _authenticateCodex(List<Map<String, dynamic>> methods) async {
+    Object? missingKey;
+    for (final method in methods.where(_isCodexApiKeyMethod)) {
+      final id = method['id'] as String? ?? '';
+      if (id.isEmpty) continue;
+      try {
+        await _authenticateWith(id);
+        return;
+      } catch (error) {
+        if (!_isMissingCodexApiKey(error)) rethrow;
+        missingKey = error;
+        Logger.info(
+          '[ACP] $id has no API key, trying ChatGPT login',
+        );
+      }
+    }
+    final loginId = _preferredCodexLoginId(methods);
+    if (loginId == null) {
+      if (missingKey != null) throw missingKey;
+      return;
+    }
+    await _authenticateWith(loginId);
+  }
+
+  Future<void> _authenticateWith(String methodId) async {
     Logger.info('[ACP] Authenticating with $methodId');
     await _request(
       'authenticate',
       {'methodId': methodId},
       timeout: const Duration(seconds: 90),
     );
+  }
+
+  bool _isCodexApiKeyMethod(Map<String, dynamic> method) {
+    final id = method['id'] as String? ?? '';
+    return id == 'api-key' ||
+        id == 'codex-api-key' ||
+        id == 'openai-api-key';
+  }
+
+  bool _isCodexLoginMethod(Map<String, dynamic> method) {
+    final id = method['id'] as String? ?? '';
+    return id == 'chat-gpt' ||
+        id == 'chat-gpt-device-code' ||
+        id == 'chatgpt';
+  }
+
+  /// Device code opens on this phone. Browser login runs on the agent host
+  /// and is only used when the agent did not offer device code.
+  String? _preferredCodexLoginId(List<Map<String, dynamic>> methods) {
+    const preferred = ['chat-gpt-device-code', 'chat-gpt', 'chatgpt'];
+    for (final id in preferred) {
+      if (methods.any((method) => method['id'] == id)) return id;
+    }
+    return null;
+  }
+
+  bool _isMissingCodexApiKey(Object error) {
+    final text = error.toString();
+    return text.contains('CODEX_API_KEY') && text.contains('OPENAI_API_KEY');
   }
 
   Future<void> _handleAgentRequest(Map<String, dynamic> request) async {
@@ -1020,7 +1096,6 @@ class WebSocketService with ChangeNotifier {
         _urlElicitationSessions[elicitationId] = sessionKey;
       }
     }
-    // No chat UI attached means nobody can answer, so cancel immediately.
     _presentClientRequest(request, autoResult: {'action': 'cancel'});
   }
 
@@ -1168,8 +1243,34 @@ class WebSocketService with ChangeNotifier {
       _clientRequestController.add(request);
       return;
     }
-    if (request['id'] != null) {
-      respondToAgentRequest(request['id'], autoResult);
+    final id = request['id'];
+    final presenter = clientRequestPresenter;
+    if (presenter != null && id != null) {
+      final pending = presenter(request);
+      if (pending != null) {
+        unawaited(() async {
+          try {
+            final result = await pending;
+            if (_isDisposed) return;
+            if (_pendingClientRequest?['id']?.toString() != id.toString()) {
+              return;
+            }
+            respondToAgentRequest(id, result);
+          } catch (error) {
+            Logger.warning('[ACP] Client request presenter failed: $error');
+            if (_isDisposed) return;
+            if (_pendingClientRequest?['id']?.toString() != id.toString()) {
+              return;
+            }
+            respondToAgentRequest(id, autoResult);
+          }
+        }());
+        return;
+      }
+    }
+    // No chat UI and no presenter means nobody can answer, so cancel.
+    if (id != null) {
+      respondToAgentRequest(id, autoResult);
     }
   }
 

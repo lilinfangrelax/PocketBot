@@ -5,6 +5,8 @@ import 'package:pocket_bot/config/gateway_config.dart';
 import 'package:pocket_bot/models/ai_contact_config.dart';
 import 'package:pocket_bot/services/ai_contact_service.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
+import 'package:pocket_bot/services/contact_service.dart';
+import 'package:pocket_bot/widgets/fluent_tab_bar.dart';
 
 import 'e2e_harness.dart';
 
@@ -34,6 +36,120 @@ Future<void> _openContacts(WidgetTester tester) async {
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('从通讯录打开新建联系人', (tester) async {
+    final snapshot = await AppStateSnapshot.capture();
+    ConnectionManager? manager;
+    try {
+      await snapshot.clear();
+      await resetE2eDatabase();
+      manager = await pumpPocketBotApp(tester);
+
+      await tester.tap(
+        find.descendant(
+          of: find.byType(FluentTabBar),
+          matching: find.text('通讯录'),
+        ),
+      );
+      await tester.pump();
+      await pumpUntil(
+        tester,
+        () => find.bySemanticsLabel('添加联系人').evaluate().isNotEmpty,
+        description: '通讯录显示添加联系人',
+      );
+      await tester.tap(find.bySemanticsLabel('添加联系人'));
+      await tester.pump();
+      await pumpUntil(
+        tester,
+        () => isShowing('新建联系人'),
+        description: '打开新建联系人',
+      );
+      expect(find.text('名称 *'), findsOneWidget);
+    } finally {
+      await disposePocketBotApp(tester, manager);
+      await snapshot.restore();
+    }
+  });
+
+  testWidgets('AI 助手默认关闭', (tester) async {
+    final snapshot = await AppStateSnapshot.capture();
+    ConnectionManager? manager;
+    try {
+      await snapshot.clear();
+      await resetE2eDatabase();
+      manager = await pumpPocketBotApp(tester);
+
+      await tester.tap(
+        find.descendant(
+          of: find.byType(FluentTabBar),
+          matching: find.text('通讯录'),
+        ),
+      );
+      await tester.pump();
+      await pumpUntil(
+        tester,
+        () => find.bySemanticsLabel('添加联系人').evaluate().isNotEmpty,
+        description: '通讯录显示添加联系人',
+      );
+      await tester.tap(find.bySemanticsLabel('添加联系人'));
+      await tester.pump();
+      await pumpUntil(
+        tester,
+        () => isShowing('AI 助手'),
+        description: '新建联系人显示 AI 助手',
+      );
+      expect(find.text('群聊中自动回复'), findsNothing);
+
+      await tester.tap(find.text('AI 助手'));
+      await tester.pump();
+      await pumpUntil(
+        tester,
+        () => isShowing('群聊中自动回复'),
+        description: '打开 AI 助手后显示自动回复',
+      );
+      expect(find.textContaining('还没有保存的连接'), findsOneWidget);
+    } finally {
+      await disposePocketBotApp(tester, manager);
+      await snapshot.restore();
+    }
+  });
+
+  testWidgets('按名称搜索联系人', (tester) async {
+    final snapshot = await AppStateSnapshot.capture();
+    ConnectionManager? manager;
+    try {
+      await snapshot.clear();
+      await resetE2eDatabase();
+      final contacts = ContactService();
+      await contacts.createContact(name: '甲乙', atName: 'jia');
+      await Future<void>.delayed(const Duration(milliseconds: 2));
+      await contacts.createContact(name: '丙丁', atName: 'bing');
+      manager = await pumpPocketBotApp(tester);
+
+      await tester.tap(
+        find.descendant(
+          of: find.byType(FluentTabBar),
+          matching: find.text('通讯录'),
+        ),
+      );
+      await tester.pump();
+      await pumpUntil(
+        tester,
+        () => isShowing('甲乙') && isShowing('丙丁'),
+        description: '通讯录显示两个联系人',
+      );
+      await tester.enterText(find.byType(EditableText).first, '甲');
+      await tester.pump();
+      await pumpUntil(
+        tester,
+        () => isShowing('甲乙') && !isShowing('丙丁'),
+        description: '搜索只保留甲乙',
+      );
+    } finally {
+      await disposePocketBotApp(tester, manager);
+      await snapshot.restore();
+    }
+  });
 
   testWidgets('创建 AI 联系人并绑定 Mock 代理', (tester) async {
     final snapshot = await AppStateSnapshot.capture();

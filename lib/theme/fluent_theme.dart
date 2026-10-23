@@ -398,6 +398,8 @@ material.ThemeData buildMaterialTheme(Brightness brightness) {
 void showAppNotice(BuildContext context, String message) {
   displayInfoBar(
     context,
+    // Bottom notices sit on the primary action (登录、启动 Agent、发送).
+    alignment: Alignment.topCenter,
     builder: (context, close) {
       return InfoBar(
         title: Text(message),

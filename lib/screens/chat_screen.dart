@@ -687,10 +687,14 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  /// Format session creation time
+  /// Format session creation time. `local-` keys store
+  /// [DateTime.microsecondsSinceEpoch]; older keys store milliseconds.
   String _formatSessionTime(String sessionKey) {
     try {
-      final timestamp = int.parse(sessionKey.split('-').last);
+      var timestamp = int.parse(sessionKey.split('-').last);
+      if (timestamp >= 100000000000000) {
+        timestamp ~/= 1000;
+      }
       final createdAt = DateTime.fromMillisecondsSinceEpoch(timestamp);
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);

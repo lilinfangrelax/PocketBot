@@ -549,18 +549,30 @@ class _WeChatSessionListState extends State<WeChatSessionList> {
       commands: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          fluent.Tooltip(
-            message: '搜索会话',
-            child: fluent.IconButton(
-              icon: const Icon(fluent.WindowsIcons.search),
-              onPressed: _showSearch,
+          Semantics(
+            button: true,
+            label: '搜索会话',
+            onTap: _showSearch,
+            excludeSemantics: true,
+            child: fluent.Tooltip(
+              message: '搜索会话',
+              child: fluent.IconButton(
+                icon: const Icon(fluent.WindowsIcons.search),
+                onPressed: _showSearch,
+              ),
             ),
           ),
-          fluent.Tooltip(
-            message: '新建会话',
-            child: fluent.IconButton(
-              icon: const Icon(fluent.WindowsIcons.add),
-              onPressed: _createSession,
+          Semantics(
+            button: true,
+            label: '新建会话',
+            onTap: _createSession,
+            excludeSemantics: true,
+            child: fluent.Tooltip(
+              message: '新建会话',
+              child: fluent.IconButton(
+                icon: const Icon(fluent.WindowsIcons.add),
+                onPressed: _createSession,
+              ),
             ),
           ),
         ],

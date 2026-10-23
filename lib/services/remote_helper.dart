@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -111,7 +112,7 @@ String _windowsDownloadScript({
       'New-Item -ItemType Directory -Force -Path \$d | Out-Null; '
       "\$p = Join-Path \$d $exe; "
       "\$t = \$p + '.partial'; "
-      "Invoke-WebRequest -UseBasicParsing -Uri $uri -OutFile \$t; "
+      "Invoke-WebRequest -UseBasicParsing -TimeoutSec 90 -Uri $uri -OutFile \$t; "
       'Move-Item -Force -LiteralPath \$t -Destination \$p';
 }
 
@@ -135,8 +136,8 @@ String helperRemoteDownloadCommand({
     );
   }
   return "sh -c 'mkdir -p \"\$HOME/.pocketbot\" && "
-      "(curl -fsSL -o \"\$HOME/.pocketbot/pocketbot-remote-$version.partial\" \"$url\" "
-      "|| wget -q -O \"\$HOME/.pocketbot/pocketbot-remote-$version.partial\" \"$url\") && "
+      "(curl -fsSL --connect-timeout 15 --max-time 90 -o \"\$HOME/.pocketbot/pocketbot-remote-$version.partial\" \"$url\" "
+      "|| wget -q -T 20 -O \"\$HOME/.pocketbot/pocketbot-remote-$version.partial\" \"$url\") && "
       "mv \"\$HOME/.pocketbot/pocketbot-remote-$version.partial\" "
       "\"\$HOME/.pocketbot/pocketbot-remote-$version\" && "
       "chmod +x \"\$HOME/.pocketbot/pocketbot-remote-$version\"'";
@@ -155,6 +156,7 @@ Future<String> ensureRemoteHelper({
   if (existing != null) return existing;
 
   final url = releaseAssetUrl(version: version, platform: platform);
+  Logger.info('[remote] helper $version missing, asking the host to download');
   try {
     await exec(helperRemoteDownloadCommand(
       platform: platform,
@@ -167,6 +169,7 @@ Future<String> ensureRemoteHelper({
   final downloaded = readyHelperPath(await exec(probe));
   if (downloaded != null) return downloaded;
 
+  Logger.info('[remote] downloading helper on this machine, then uploading');
   final bytes = await download(Uri.parse(url));
   if (bytes.isEmpty) {
     throw Exception('HELPER_INSTALL_FAILED:远程服务安装包是空的');
@@ -250,13 +253,21 @@ Future<RemotePlatform> detectRemotePlatform(
   return parsed;
 }
 
+Dio _releaseClient() {
+  return Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 20),
+      receiveTimeout: const Duration(minutes: 2),
+    ),
+  );
+}
+
 Future<List<int>> downloadReleaseAsset(Uri url) async {
-  final response = await Dio().get<List<int>>(
+  final response = await _releaseClient().get<List<int>>(
     url.toString(),
     options: Options(
       responseType: ResponseType.bytes,
       followRedirects: true,
-      receiveTimeout: const Duration(minutes: 2),
     ),
   );
   final bytes = response.data;
@@ -267,12 +278,11 @@ Future<List<int>> downloadReleaseAsset(Uri url) async {
 }
 
 Future<void> downloadReleaseAssetToFile(Uri url, File destination) async {
-  final response = await Dio().download(
+  final response = await _releaseClient().download(
     url.toString(),
     destination.path,
     options: Options(
       followRedirects: true,
-      receiveTimeout: const Duration(minutes: 2),
     ),
   );
   if (response.statusCode != 200) {
@@ -281,11 +291,18 @@ Future<void> downloadReleaseAssetToFile(Uri url, File destination) async {
 }
 
 /// SSH exec that returns stdout. A non-zero exit with empty stdout throws.
-Future<String> execRemote(SSHClient client, String command) async {
+///
+/// [timeout] closes the channel so a host-side download cannot sit forever
+/// when curl/wget ignore their own limits.
+Future<String> execRemote(
+  SSHClient client,
+  String command, {
+  Duration? timeout,
+}) async {
   final session = await client.execute(command);
   final stdout = StringBuffer();
   final stderr = StringBuffer();
-  await Future.wait([
+  final collect = Future.wait([
     session.stdout
         .cast<List<int>>()
         .transform(utf8.decoder)
@@ -294,8 +311,20 @@ Future<String> execRemote(SSHClient client, String command) async {
         .cast<List<int>>()
         .transform(utf8.decoder)
         .forEach(stderr.write),
-  ]);
-  await session.done;
+  ]).then((_) => session.done);
+  try {
+    if (timeout == null) {
+      await collect;
+    } else {
+      collect.catchError((Object _) {});
+      await collect.timeout(timeout, onTimeout: () {
+        session.close();
+        throw TimeoutException('远程命令超过 ${timeout.inSeconds} 秒');
+      });
+    }
+  } on TimeoutException catch (error) {
+    throw Exception(error.message ?? '远程命令超时');
+  }
   final out = stdout.toString();
   if (Logger.isVerbose) {
     Logger.debug('[remote] exec exit=${session.exitCode} '
@@ -391,7 +420,13 @@ Future<String> _installHelper({
   return ensureRemoteHelper(
     platform: platform,
     version: version,
-    exec: (command) => execRemote(client, command),
+    exec: (command) => execRemote(
+      client,
+      command,
+      timeout: command.contains('curl -fsSL') || command.contains('.partial')
+          ? const Duration(seconds: 100)
+          : null,
+    ),
     upload: (path, bytes) => uploadRemoteFile(client, path, bytes),
     download: downloadReleaseAsset,
   );

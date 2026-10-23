@@ -70,18 +70,30 @@ class _ContactsScreenState extends State<ContactsScreen> {
       commands: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          fluent.Tooltip(
-            message: '创建群聊',
-            child: fluent.IconButton(
-              icon: const Icon(fluent.WindowsIcons.group),
-              onPressed: _navigateToCreateGroup,
+          Semantics(
+            button: true,
+            label: '创建群聊',
+            onTap: _navigateToCreateGroup,
+            excludeSemantics: true,
+            child: fluent.Tooltip(
+              message: '创建群聊',
+              child: fluent.IconButton(
+                icon: const Icon(fluent.WindowsIcons.group),
+                onPressed: _navigateToCreateGroup,
+              ),
             ),
           ),
-          fluent.Tooltip(
-            message: '添加联系人',
-            child: fluent.IconButton(
-              icon: const Icon(fluent.WindowsIcons.add_friend),
-              onPressed: _navigateToCreateContact,
+          Semantics(
+            button: true,
+            label: '添加联系人',
+            onTap: _navigateToCreateContact,
+            excludeSemantics: true,
+            child: fluent.Tooltip(
+              message: '添加联系人',
+              child: fluent.IconButton(
+                icon: const Icon(fluent.WindowsIcons.add_friend),
+                onPressed: _navigateToCreateContact,
+              ),
             ),
           ),
         ],

@@ -4,6 +4,7 @@ Windows 桌面端采用混合验收：
 
 - `@uia` Feature 由 Teshi 的 winapp bridge 驱动真实窗口，验收应用外壳与底部导航。
 - `@integration` Feature 由 Flutter `integration_test` 驱动真实应用逻辑与界面，使用确定性 Mock ACP 代理，不访问网络或真实代理。
+- `@real` Feature 读取仓库根目录 `.env` 里的 SSH 主机，连真实远程 Agent。它不在 `tool/e2e_integration.ps1` 里，用 `tool/e2e_real_ssh.ps1` 单独跑。
 
 Feature 位于 `features/zh-CN/`，步骤文本不包含选择器。
 
@@ -12,6 +13,12 @@ Feature 位于 `features/zh-CN/`，步骤文本不包含选择器。
 | Feature | 标签 | 执行入口 | 验收内容 |
 | --- | --- | --- | --- |
 | 启动与底部导航 | `@uia` | `tool/e2e_uia.ps1` | 启动默认消息页、四个底部标签切换 |
+| 真实远程Agent | `@real` | `tool/e2e_real_ssh.ps1` | 用 `.env` 中的 SSH 主机登录，选目录启动远程 Cursor agent，并收到 `REAL_AGENT_OK` |
+| 消息空态 | `@integration` | `session_empty_test.dart` | 无会话时新建并提示重连；搜索能找到「新对话」，聊天时间显示今天 |
+| 发现页 | `@integration` | `discover_page_test.dart` | 未连接时的本机启动和 SSH 表单；已保存但未检查的主机显示登录；打开 ACP Registry |
+| 通讯录与AI联系人 | `@integration` | `ai_contact_test.dart` | 打开新建联系人；AI 助手默认关闭；按名称搜索；创建并绑定 Mock 代理后从通讯录聊天 |
+| 群聊列表 | `@integration` | `group_list_test.dart` | 空列表打开创建群组，含工作目录，而不是开发中提示 |
+| 设置页 | `@integration` | `settings_page_test.dart` | 头像、语言、主题、清除会话、自动允许、开源、隐私政策、空 MCP 列表和调试日志 |
 | 本机ACP连接与聊天 | `@integration` | `acp_chat_test.dart` | 本机代理启动、会话建立、确定性回复 |
 | 聊天消息与流式回复 | `@integration` | `chat_streaming_test.dart` | 分块流式呈现、空消息不发送、代码块复制 |
 | 生成控制与异常恢复 | `@integration` | `generation_control_test.dart` | 停止生成、断线发送失败保留输入、重连重发 |
@@ -19,14 +26,13 @@ Feature 位于 `features/zh-CN/`，步骤文本不包含选择器。
 | 工具调用与权限确认 | `@integration` | `tool_permission_test.dart` | 允许一次后工具完成、拒绝后工具失败并继续回复 |
 | 聊天图片附件 | `@integration` | `chat_attachment_test.dart` | 选择图片、仅附件发送、ACP `image` 内容块与缩略图 |
 | Agent 登录退出 | `@integration` | `agent_logout_test.dart` | 设置页退出 Agent 登录并提示成功 |
-| ACP elicitation | `@integration` | `elicitation_test.dart` | 填写表单并按类型回传、URL 授权后打开链接、完成通知 |
-| 客户端 terminal | `@integration` | `terminal_test.dart` | 代理发起 terminal/create 执行命令、等待退出、读取输出并释放 |
+| ACP 表单与链接授权 | `@integration` | `elicitation_test.dart` | 填写表单并按类型回传、URL 授权后打开链接、完成通知 |
+| 客户端终端 | `@integration` | `terminal_test.dart` | 代理执行终端命令、读取退出码和输出并释放 |
 | 群聊@路由 | `@integration` | `group_at_routing_test.dart` | 真实群聊界面中被 @ 的联系人回复、未 @ 时不触发、多代理分别回复、失效连接仅提示失败 |
-| ACP能力与计划 | `@integration` | `acp_capabilities_test.dart` | 代理配置选项（模型/模式）展示与切换、计划面板展开、`cursor/update_todos` 待办、`available_commands_update` 斜杠命令、代理 fs 读写 |
-| 通讯录与AI联系人 | `@integration` | `ai_contact_test.dart` | AI 联系人创建与代理绑定、从通讯录打开聊天 |
+| ACP 能力与计划 | `@integration` | `acp_capabilities_test.dart` | 模型与模式切换、计划展开、待办、斜杠命令、代理 fs 读写 |
 | 通讯录联系人管理 | `@integration` | `contact_management_test.dart` | 详情中改名后详情与列表同步、删除后列表隐藏且存储中停用 |
 | 设置与MCP | `@integration` | `settings_mcp_test.dart` | 添加 stdio MCP 服务器后列表与配置持久化、删除后列表与配置同步移除 |
-| SSH远程连接 | `@integration` | `ssh_connection_test.dart` | 只填主机和用户名时阻止登录并提示缺少密码或私钥；真实 SSH 握手依赖外部主机，未纳入自动化 |
+| SSH远程连接 | `@integration` | `ssh_connection_test.dart` | 只填主机和用户名时阻止登录并提示缺少密码或私钥。真实主机和远程 Agent 不在这套 Mock 流程里，由 `tool/e2e_real_ssh.ps1` 读取仓库根目录 `.env` 后单独验证 |
 
 每个 `@integration` 场景都是独立的 `testWidgets` 用例，可单独运行；同一文件内的用例通过 `AppStateSnapshot` 备份并恢复用户状态，并在开始时重建隔离数据库。
 
@@ -47,21 +53,17 @@ powershell -ExecutionPolicy Bypass -File tool/e2e_integration.ps1
 
 运行前请关闭已在运行的 PocketBot，避免它占用 SQLite 数据库文件。测试会备份并在结束时恢复用户的会话、已保存连接、MCP 配置与代理选择（Flutter secure storage 中的 `chat_sessions`、`gateways_config`、`last_connected_gateway`、`mcp_servers`，以及 SharedPreferences 中的 `acp_agent_id` / `acp_agent_label`）；恢复前会先卸载界面并等待防抖写入落盘，避免与退出保存竞态。测试中途强制结束进程时，这些数据可能停留在测试状态，请重新运行一次或手动恢复。
 
-### 真实 SSH 手工验收
+### 真实远程 Agent
 
-`integration_test/manual/real_ssh_test.dart` 针对真实 SSH 主机上的 ACP 代理做端到端验证：应用通过 SSH 登录，远端 helper 安装/探测代理，启动 Cursor ACP，建立会话并收到回复。该文件位于顶层 `*_test.dart` 之外，不会被 `tool/e2e_integration.ps1` 选中，需要手工运行。
+`features/zh-CN/真实远程Agent.feature` 带 `@real`。`integration_test/manual/real_ssh_test.dart` 实现它：应用通过 `.env` 中的 SSH 主机登录，远端 helper 安装或探测代理，启动 Cursor ACP，建立会话并收到 `REAL_AGENT_OK`。该测试不在 `integration_test/*_test.dart` 顶层，`tool/e2e_integration.ps1` 不会选中它。
+
+在仓库根目录复制 `.env.example` 为 `.env`，填入 `POCKETBOT_REAL_SSH_HOST`、`POCKETBOT_REAL_SSH_PORT`、`POCKETBOT_REAL_SSH_USER`、`POCKETBOT_REAL_SSH_KEY_FILE`。私钥加密时再填 `POCKETBOT_REAL_SSH_KEY_PASSPHRASE`。`.env` 已加入 `.gitignore`，脚本不会打印私钥内容。
 
 ```powershell
-$env:POCKETBOT_REAL_SSH_HOST='47.119.137.225'
-$env:POCKETBOT_REAL_SSH_PORT='37777'
-$env:POCKETBOT_REAL_SSH_USER='enhook'
-$env:POCKETBOT_REAL_SSH_KEY_FILE="$env:USERPROFILE\.ssh\id_rsa"
-$env:NO_PROXY='127.0.0.1,localhost'
-$env:no_proxy='127.0.0.1,localhost'
-flutter test integration_test/manual/real_ssh_test.dart -d windows
+powershell -ExecutionPolicy Bypass -File tool/e2e_real_ssh.ps1
 ```
 
-`NO_PROXY` 必须包含本机回环地址：Flutter 测试驱动通过 VM Service 的 localhost WebSocket 连接被测进程，若系统代理（如 `HTTP_PROXY=127.0.0.1:10808`）同时生效，握手会被劫持并报 `was not upgraded to websocket`。测试会备份并恢复本机会话与连接配置，不会打印私钥内容。远端 helper 按设计在断开后保留代理进程，重复运行会以 `--fresh` 重建会话。
+脚本会把 SQLite 隔离到 `build/e2e/real-db`，并强制 `NO_PROXY=127.0.0.1,localhost`。`NO_PROXY` 必须包含本机回环地址：Flutter 测试驱动通过 VM Service 的 localhost WebSocket 连接被测进程，若系统代理（如 `HTTP_PROXY=127.0.0.1:10808`）同时生效，握手会被劫持并报 `was not upgraded to websocket`。测试会备份并恢复本机会话与连接配置。远端 helper 按设计在断开后保留代理进程，重复运行会以 `--fresh` 重建会话。当前界面是先「保存并登录」，主机在线后再「选目录启动」。
 
 ### Mock ACP 代理
 

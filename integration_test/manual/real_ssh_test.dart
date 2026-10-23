@@ -13,30 +13,63 @@ import 'package:pocket_bot/widgets/fluent_tab_bar.dart';
 
 import '../e2e_harness.dart';
 
-/// Manual end-to-end check against a real SSH host running Cursor's ACP agent.
+/// Real end-to-end check for `features/zh-CN/真实远程Agent.feature`.
 ///
 /// This file lives outside `*_test.dart` at the top level of
 /// `integration_test/`, so `tool/e2e_integration.ps1` does not pick it up.
 ///
-/// Usage (PowerShell):
-///   $env:POCKETBOT_REAL_SSH_HOST='47.119.137.225'
-///   $env:POCKETBOT_REAL_SSH_PORT='37777'
-///   $env:POCKETBOT_REAL_SSH_USER='enhook'
-///   $env:POCKETBOT_REAL_SSH_KEY_FILE="$env:USERPROFILE\.ssh\id_rsa"
-///   $env:NO_PROXY='127.0.0.1,localhost'; $env:no_proxy='127.0.0.1,localhost'
-///   flutter test integration_test/manual/real_ssh_test.dart -d windows
+/// Usage (PowerShell), from the repo root `.env`:
+///   powershell -ExecutionPolicy Bypass -File tool/e2e_real_ssh.ps1
 ///
-/// `NO_PROXY` is required: the test driver reaches the app through a localhost
-/// VM-service WebSocket, which a system HTTP proxy would intercept.
+/// Required `.env` keys: POCKETBOT_REAL_SSH_HOST, POCKETBOT_REAL_SSH_PORT,
+/// POCKETBOT_REAL_SSH_USER, POCKETBOT_REAL_SSH_KEY_FILE.
+/// Optional: POCKETBOT_REAL_SSH_KEY_PASSPHRASE.
+/// Process environment overrides `.env`. The runner must still set `NO_PROXY`
+/// before `flutter test`, because the driver WebSocket is opened by the tool
+/// process rather than this test.
 ///
 /// The run installs `pocketbot-remote` under the remote `~/.pocketbot` and
 /// starts the Cursor CLI there. The remote agent process is intentionally kept
 /// alive after disconnect so a later reconnect can resume it.
-String _requireEnv(String name) {
-  final value = Platform.environment[name];
-  if (value == null || value.isEmpty) {
-    throw StateError('缺少环境变量 $name');
+final Map<String, String> _dotenv = _loadDotEnv();
+
+Map<String, String> _loadDotEnv() {
+  final file = File('.env');
+  if (!file.existsSync()) return const {};
+  final values = <String, String>{};
+  for (final raw in file.readAsLinesSync()) {
+    final line = raw.trim();
+    if (line.isEmpty || line.startsWith('#')) continue;
+    final eq = line.indexOf('=');
+    if (eq < 1) continue;
+    final name = line.substring(0, eq).trim();
+    var value = line.substring(eq + 1).trim();
+    final quoted = value.length >= 2 &&
+        ((value.startsWith('"') && value.endsWith('"')) ||
+            (value.startsWith("'") && value.endsWith("'")));
+    if (quoted) value = value.substring(1, value.length - 1);
+    values[name] = value;
   }
+  return values;
+}
+
+String _requireEnv(String name) {
+  final fromProcess = Platform.environment[name];
+  final value =
+      (fromProcess != null && fromProcess.isNotEmpty) ? fromProcess : _dotenv[name];
+  if (value == null || value.isEmpty) {
+    throw StateError(
+      '缺少 $name。请在仓库根目录 .env 中填写后运行 tool/e2e_real_ssh.ps1',
+    );
+  }
+  return value;
+}
+
+String? _optionalEnv(String name) {
+  final fromProcess = Platform.environment[name];
+  if (fromProcess != null && fromProcess.isNotEmpty) return fromProcess;
+  final value = _dotenv[name];
+  if (value == null || value.isEmpty) return null;
   return value;
 }
 
@@ -50,6 +83,29 @@ Future<void> _enterText(
   await tester.pump();
   await tester.enterText(finder, text);
   await tester.pump();
+}
+
+/// The saved-host row sits above the SSH form. A [ListView] does not build
+/// rows that are scrolled out of cache, so pull the list back toward the top
+/// until [text] is mounted.
+Future<void> _waitUntilShown(
+  WidgetTester tester,
+  Finder scrollable,
+  String text, {
+  required Duration timeout,
+  required String description,
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!isShowing(text)) {
+    if (DateTime.now().isAfter(deadline)) {
+      throw TestFailure('等待超时：$description');
+    }
+    if (isShowing('离线')) {
+      throw TestFailure('SSH 登录失败，主机显示离线');
+    }
+    await tester.drag(scrollable, const Offset(0, 500));
+    await tester.pump(const Duration(milliseconds: 200));
+  }
 }
 
 void main() {
@@ -110,13 +166,33 @@ void main() {
         find.widgetWithText(TextFormField, '私钥 PEM（可选）'),
         privateKey,
       );
+      final passphrase = _optionalEnv('POCKETBOT_REAL_SSH_KEY_PASSPHRASE');
+      if (passphrase != null) {
+        await _enterText(
+          tester,
+          find.widgetWithText(TextFormField, '私钥密码（私钥加密时填写）'),
+          passphrase,
+        );
+      }
 
       await tester.scrollUntilVisible(
-        find.text('登录并选择目录'),
+        find.text('保存并登录'),
         300,
         scrollable: homeScroll.first,
       );
-      await tester.tap(find.text('登录并选择目录'));
+      await tester.tap(find.text('保存并登录'));
+      await tester.pump();
+
+      await _waitUntilShown(
+        tester,
+        homeScroll.first,
+        '选目录启动',
+        timeout: const Duration(minutes: 2),
+        description: 'SSH 登录成功后出现选目录启动',
+      );
+      await tester.ensureVisible(find.text('选目录启动'));
+      await tester.tap(find.text('选目录启动'));
+      await tester.pump();
 
       await pumpUntil(
         tester,
@@ -148,7 +224,16 @@ void main() {
             '${tester.widget<TextField>(pathLabel).controller?.text}');
       }
       debugPrint('[REAL-SSH] starting agent in the remote home directory');
-      await tester.tap(find.text('在此目录启动 Agent'));
+      await pumpUntil(
+        tester,
+        () => !isShowing('正在登录远程主机'),
+        timeout: const Duration(seconds: 5),
+        description: '关闭正在登录提示',
+      );
+      final startAgent = find.text('在此目录启动 Agent');
+      await tester.ensureVisible(startAgent);
+      await tester.pump();
+      await tester.tap(startAgent);
       await tester.pump();
 
       await pumpUntil(

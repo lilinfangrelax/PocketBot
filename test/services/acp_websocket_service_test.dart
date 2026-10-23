@@ -235,6 +235,88 @@ void main() {
     );
   });
 
+  test('uses ChatGPT device-code login when Codex has no API key', () async {
+    final transport = _FakeAcpTransport();
+    final service = WebSocketService();
+    addTearDown(() async {
+      await service.disconnect();
+      await transport.close();
+    });
+
+    final initialized = service.connectWithTransport(transport);
+    await transport.waitForMethod('initialize');
+    transport.respondToLast({
+      'protocolVersion': 1,
+      'agentCapabilities': <String, dynamic>{},
+      'agentInfo': {'name': 'codex-acp'},
+      'authMethods': [
+        {
+          'id': 'api-key',
+          'name': 'API Key',
+          '_meta': {
+            'api-key': {'provider': 'openai'},
+          },
+        },
+        {'id': 'chat-gpt', 'name': 'ChatGPT'},
+        {'id': 'chat-gpt-device-code', 'name': 'ChatGPT (device code)'},
+      ],
+    });
+
+    final first = await transport.waitForMethod('authenticate');
+    expect(first['params']['methodId'], 'api-key');
+    transport.push({
+      'jsonrpc': '2.0',
+      'id': first['id'],
+      'error': {
+        'code': -32603,
+        'message':
+            'Internal error: CODEX_API_KEY or OPENAI_API_KEY is not set',
+      },
+    });
+
+    final second = await transport.waitForMethodCount('authenticate', 2);
+    expect(second['params']['methodId'], 'chat-gpt-device-code');
+    transport.respondToLast(<String, dynamic>{});
+    await initialized;
+
+    expect(service.isConnected, isTrue);
+    expect(
+      transport.sent.where((request) => request['method'] == 'authenticate'),
+      hasLength(2),
+    );
+  });
+
+  test('keeps Codex API key auth when the agent accepts it', () async {
+    final transport = _FakeAcpTransport();
+    final service = WebSocketService();
+    addTearDown(() async {
+      await service.disconnect();
+      await transport.close();
+    });
+
+    final initialized = service.connectWithTransport(transport);
+    await transport.waitForMethod('initialize');
+    transport.respondToLast({
+      'protocolVersion': 1,
+      'agentCapabilities': <String, dynamic>{},
+      'agentInfo': {'name': 'codex-acp'},
+      'authMethods': [
+        {'id': 'api-key', 'name': 'API Key'},
+        {'id': 'chat-gpt-device-code', 'name': 'ChatGPT (device code)'},
+      ],
+    });
+
+    final first = await transport.waitForMethod('authenticate');
+    expect(first['params']['methodId'], 'api-key');
+    transport.respondToLast(<String, dynamic>{});
+    await initialized;
+
+    expect(
+      transport.sent.where((request) => request['method'] == 'authenticate'),
+      hasLength(1),
+    );
+  });
+
   test('prefers agent auth methods over terminal ones', () async {
     final transport = _FakeAcpTransport();
     final service = WebSocketService();
@@ -2150,6 +2232,28 @@ void main() {
             },
           },
         };
+
+    test('shows elicitation through the app presenter before chat opens',
+        () async {
+      final transport = _FakeAcpTransport();
+      final service = WebSocketService();
+      addTearDown(() async {
+        WebSocketService.clientRequestPresenter = null;
+        await service.disconnect();
+        await transport.close();
+      });
+      WebSocketService.clientRequestPresenter = (request) async {
+        expect(request['method'], 'elicitation/create');
+        return {'action': 'accept'};
+      };
+      await _connectFake(service, transport);
+
+      transport.push(formRequest('elicit-presenter'));
+
+      final reply = await transport.waitForResponse('elicit-presenter');
+      expect(reply['result'], {'action': 'accept'});
+      expect(service.pendingClientRequest, isNull);
+    });
 
     test('cancels elicitation when no chat UI is attached', () async {
       final transport = _FakeAcpTransport();

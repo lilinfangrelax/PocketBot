@@ -520,7 +520,8 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         FluentSectionHeader(_gatewayListTitle(manager, allGateways)),
         ...allGateways.map((gw) {
-          final isConnected = manager.gateway != null &&
+          final isConnected = manager.state == ConnectionState.connected &&
+              manager.gateway != null &&
               manager.gateway!.connectionId == gw.connectionId;
           return _GatewayListTile(
             gateway: gw,
@@ -694,10 +695,15 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    final navigator = Navigator.of(context, rootNavigator: true);
     var loadingShown = true;
-    fluent.showDialog<void>(
+    // Zero-length transition: a warm SSH login returns on the next microtask,
+    // and the default dialog exit animation would stay above the directory
+    // page and swallow taps on「在此目录启动 Agent」.
+    final dialog = fluent.showDialog<void>(
       context: context,
       barrierDismissible: false,
+      transitionDuration: Duration.zero,
       builder: (_) => const fluent.ContentDialog(
         content: Row(
           children: [
@@ -712,15 +718,16 @@ class _HomeScreenState extends State<HomeScreen> {
     SshRemoteSession? session;
     try {
       session = await manager.browseHost(target);
+      if (navigator.canPop()) navigator.pop();
+      loadingShown = false;
+      await dialog;
+      await WidgetsBinding.instance.endOfFrame;
       if (!mounted) {
         await session.close();
         return;
       }
-      Navigator.pop(context);
-      loadingShown = false;
 
-      final cwd = await Navigator.push<String>(
-        context,
+      final cwd = await navigator.push<String>(
         MaterialPageRoute(
           builder: (_) => RemoteDirectoryPicker(
             source: session!,
@@ -735,8 +742,8 @@ class _HomeScreenState extends State<HomeScreen> {
       await manager.connectTo(target.copyWith(workingDirectory: cwd));
     } catch (error) {
       await session?.close();
+      if (loadingShown && navigator.canPop()) navigator.pop();
       if (!mounted) return;
-      if (loadingShown) Navigator.pop(context);
       showAppNotice(context, _simplifyError(error.toString()));
     }
   }
