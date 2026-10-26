@@ -42,7 +42,11 @@ class _UpdateSettingsCardState extends State<UpdateSettingsCard> {
                 leading: const Icon(Icons.system_update),
                 title: const Text('检查更新'),
                 subtitle: Text(
-                  _checking ? '正在检查...' : '从 GitHub Releases 检查新版本',
+                  _checking
+                      ? '正在检查...'
+                      : channel == UpdateChannel.dev
+                          ? '在 Tailscale 上查找开发机'
+                          : '从 GitHub Releases 检查新版本',
                 ),
                 trailing: _checking
                     ? const SizedBox(
@@ -143,7 +147,8 @@ class UpdateDialogs {
                 Text('新版本 ${result.release.version} 可用'),
                 const SizedBox(height: 8),
                 Text(
-                  result.release.prerelease ? 'Beta 通道' : '正式版',
+                  result.sourceLabel ??
+                      (result.release.prerelease ? 'Beta 通道' : '正式版'),
                   style: TextStyle(
                       fontSize: 12,
                       color: FluentColors.of(context).textSecondary),
@@ -269,6 +274,10 @@ class UpdateDialogs {
       }
 
       final opened = await updater.installOrOpen(file);
+      final sha = result.devSha256;
+      if (opened && sha != null && sha.isNotEmpty) {
+        await UpdateConfig.setInstalledDevSha256(sha);
+      }
       if (!context.mounted) return;
       if (!opened) {
         final saved = '已保存：${file.path}';

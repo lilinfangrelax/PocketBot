@@ -21,6 +21,14 @@ void main() {
     );
   });
 
+  test('a missing dev host says the tailscale publisher was not found', () {
+    const outcome = UpdateCheckOutcome(
+      channel: UpdateChannel.dev,
+      failure: UpdateCheckFailure.emptyChannel,
+    );
+    expect(outcome.notice, '没有发现 Tailscale 上的开发机');
+  });
+
   test('an empty stable channel tells the user to switch to beta', () {
     const outcome = UpdateCheckOutcome(
       channel: UpdateChannel.stable,

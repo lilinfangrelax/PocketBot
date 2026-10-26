@@ -1,8 +1,10 @@
 package com.example.pocket_bot
 
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
+import android.net.ConnectivityManager
 import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -12,6 +14,14 @@ import java.io.File
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, tailnetChannelName)
+            .setMethodCallHandler { call, result ->
+                if (call.method != "suffix") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                result.success(tailnetSearchDomains())
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
                 if (call.method != "install") {
@@ -30,6 +40,20 @@ class MainActivity : FlutterActivity() {
                     result.error("install_failed", error.message, null)
                 }
             }
+    }
+
+    private fun tailnetSearchDomains(): String? {
+        val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return null
+        val domains = StringBuilder()
+        for (network in manager.allNetworks) {
+            val value = manager.getLinkProperties(network)?.domains ?: continue
+            if (value.isBlank()) continue
+            if (domains.isNotEmpty()) domains.append(',')
+            domains.append(value)
+        }
+        val text = domains.toString()
+        return text.ifBlank { null }
     }
 
     private fun installApk(file: File) {
@@ -68,5 +92,6 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         const val channelName = "pocketbot/apk_install"
+        const val tailnetChannelName = "pocketbot/tailnet"
     }
 }

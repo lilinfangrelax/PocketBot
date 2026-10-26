@@ -44,6 +44,19 @@ void main() {
       expect(choice.directive, 'PROXY https-proxy.example:8080');
     });
 
+    test('a tailscale service name skips the https proxy', () {
+      final choice = chooseUpdateProxy(
+        target: Uri.parse(
+          'https://pocketbot-dev.example.ts.net/update.json',
+        ),
+        environment: const {
+          'HTTPS_PROXY': 'http://https-proxy.example:8080',
+        },
+      );
+      expect(choice.source, 'tailscale');
+      expect(choice.directive, 'DIRECT');
+    });
+
     test('all_proxy is used when https_proxy is unset', () {
       final choice = chooseUpdateProxy(
         target: github,

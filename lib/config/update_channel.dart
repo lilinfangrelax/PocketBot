@@ -10,18 +10,21 @@ class UpdateConstants {
 
 enum UpdateChannel {
   stable,
-  beta;
+  beta,
+  dev;
 
   String get id => name;
 
   String get displayName => switch (this) {
         UpdateChannel.stable => '正式版',
         UpdateChannel.beta => 'Beta',
+        UpdateChannel.dev => '开发机',
       };
 
   String get description => switch (this) {
         UpdateChannel.stable => '仅接收正式发布版本',
         UpdateChannel.beta => '接收最新测试版本',
+        UpdateChannel.dev => '自动发现 Tailscale 上正在发布的安装包',
       };
 
   static UpdateChannel fromId(String? id) {

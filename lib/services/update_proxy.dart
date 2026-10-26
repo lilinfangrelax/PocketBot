@@ -54,6 +54,11 @@ UpdateProxyChoice chooseUpdateProxy({
   String? windowsProxy,
   String? windowsBypass,
 }) {
+  // MagicDNS names are only reachable through the tailnet, not an HTTP proxy.
+  if (_isTailscaleMagicDns(target.host)) {
+    return const UpdateProxyChoice.direct('tailscale');
+  }
+
   if (_hostBypassed(
     target.host,
     _firstEnv(environment, const ['NO_PROXY', 'no_proxy']),
@@ -238,6 +243,11 @@ int _defaultPort(String scheme) {
     default:
       return 80;
   }
+}
+
+bool _isTailscaleMagicDns(String host) {
+  final name = _normalizeHost(host);
+  return name.endsWith('.ts.net') && name != 'ts.net';
 }
 
 bool _hostBypassed(

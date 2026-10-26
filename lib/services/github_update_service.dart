@@ -8,7 +8,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:pocket_bot/config/update_config.dart';
 import 'package:pocket_bot/services/asset_download.dart';
+import 'package:pocket_bot/services/dev_update_client.dart';
 import 'package:pocket_bot/services/github_release_client.dart';
+import 'package:pocket_bot/services/tailnet_suffix.dart';
 import 'package:pocket_bot/services/update_proxy.dart';
 import 'package:pocket_bot/services/update_transport.dart';
 import 'package:pocket_bot/services/windows_setup_update.dart';
@@ -26,19 +28,34 @@ class GithubUpdateService {
     String repo = UpdateConstants.githubRepo,
     String Function()? currentVersion,
     UpdatePlatform Function()? platform,
-  })  : _client = GithubReleaseClient(
+    Future<String?> Function()? tailnetSuffix,
+    String? Function()? installedDevSha256,
+  })  : _externalHttp = httpClient,
+        _currentVersion = currentVersion ?? _defaultVersion,
+        _platform = platform ?? currentPlatform,
+        _tailnetSuffix = tailnetSuffix ?? discoverTailnetSuffix,
+        _installedDevSha256 =
+            installedDevSha256 ?? (() => UpdateConfig.installedDevSha256),
+        _client = GithubReleaseClient(
           httpClient: httpClient,
           owner: owner,
           repo: repo,
-          currentVersion: currentVersion ?? (() => AppVersion.baseVersion),
+          currentVersion: currentVersion ?? _defaultVersion,
           platform: platform ?? currentPlatform,
         ),
         _dio = dio ?? createUpdateDio(),
         _ownsDio = dio == null;
 
+  final http.Client? _externalHttp;
+  final String Function() _currentVersion;
+  final UpdatePlatform Function() _platform;
+  final Future<String?> Function() _tailnetSuffix;
+  final String? Function() _installedDevSha256;
   final GithubReleaseClient _client;
   final Dio _dio;
   final bool _ownsDio;
+
+  static String _defaultVersion() => AppVersion.baseVersion;
 
   static UpdatePlatform currentPlatform() {
     if (Platform.isAndroid) return UpdatePlatform.android;
@@ -50,6 +67,9 @@ class GithubUpdateService {
     UpdateChannel? channel,
   }) async {
     final selected = channel ?? UpdateConfig.channel;
+    if (selected == UpdateChannel.dev) {
+      return _checkDevChannel();
+    }
     try {
       final result = await _client.checkForUpdates(channel: selected);
       if (result == null) {
@@ -72,6 +92,33 @@ class GithubUpdateService {
         failure: UpdateCheckFailure.request,
         error: detail,
       );
+    }
+  }
+
+  Future<UpdateCheckOutcome> _checkDevChannel() async {
+    final ownsClient = _externalHttp == null;
+    final httpClient = _externalHttp ?? createUpdateHttpClient();
+    final dev = DevUpdateClient(
+      httpClient: httpClient,
+      tailnetSuffix: _tailnetSuffix,
+      currentVersion: _currentVersion,
+      installedSha256: _installedDevSha256(),
+      platform: _platform(),
+    );
+    try {
+      final outcome = await dev.check();
+      final result = outcome.result;
+      if (result == null) {
+        Logger.info('[Update] Dev check: ${outcome.notice}');
+      } else {
+        Logger.info(
+          '[Update] channel=dev current=${result.currentVersion} '
+          'latest=${result.release.version} available=${result.updateAvailable}',
+        );
+      }
+      return outcome;
+    } finally {
+      if (ownsClient) httpClient.close();
     }
   }
 

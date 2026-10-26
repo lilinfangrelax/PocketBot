@@ -57,6 +57,7 @@ dependencies:
 
   # Utilities
   uuid: ^4.2.1
+  crypto: ^3.0.7
   # Windows update checks read the system proxy and root store.
   ffi: ^2.1.0
 

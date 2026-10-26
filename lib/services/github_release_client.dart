@@ -154,6 +154,11 @@ class UpdateCheckOutcome {
         if (channel == UpdateChannel.stable) {
           return '正式版通道还没有发布，请把更新通道改成 Beta';
         }
+        if (channel == UpdateChannel.dev) {
+          final detail = error?.trim();
+          if (detail != null && detail.isNotEmpty) return detail;
+          return '没有发现 Tailscale 上的开发机';
+        }
         return '这个通道还没有可安装的版本';
       case UpdateCheckFailure.none:
         if (result == null || result!.updateAvailable) return null;
@@ -167,12 +172,16 @@ class UpdateCheckResult {
   final String currentVersion;
   final bool updateAvailable;
   final UpdatePlatform platform;
+  final String? sourceLabel;
+  final String? devSha256;
 
   const UpdateCheckResult({
     required this.release,
     required this.currentVersion,
     required this.updateAvailable,
     required this.platform,
+    this.sourceLabel,
+    this.devSha256,
   });
 
   GithubAsset? get platformAsset => release.assetFor(platform);
