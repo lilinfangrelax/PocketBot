@@ -1,5 +1,5 @@
 # Stage the Flutter Windows release into a zip and, when Inno Setup is
-# installed, a per-user installer. The zip is what the in-app updater downloads.
+# installed, a per-user installer. The Setup.exe is what the in-app updater runs.
 param(
   [Parameter(Mandatory = $true)][string]$Version,
   [string]$RepoRoot = ""

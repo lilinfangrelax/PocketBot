@@ -8,6 +8,15 @@ import 'package:pocket_bot/utils/semver.dart';
 
 enum UpdatePlatform { android, windows, other }
 
+/// GitHub asset published by windows/packaging/package.ps1.
+///
+/// Remote helper executables are also attached to the release, so the match
+/// has to require both the Windows package prefix and the `-Setup.exe` suffix.
+bool isWindowsSetupFileName(String name) {
+  final lower = name.toLowerCase();
+  return lower.contains('windows') && lower.endsWith('-setup.exe');
+}
+
 class GithubAsset {
   final String name;
   final String downloadUrl;
@@ -88,11 +97,7 @@ class GithubRelease {
           (name) => name.toLowerCase().endsWith('.apk'),
         );
       case UpdatePlatform.windows:
-        return _firstWhereName((name) {
-              final lower = name.toLowerCase();
-              return lower.endsWith('.zip') && lower.contains('windows');
-            }) ??
-            _firstWhereName((name) => name.toLowerCase().endsWith('.zip'));
+        return _firstWhereName(isWindowsSetupFileName);
       case UpdatePlatform.other:
         return null;
     }

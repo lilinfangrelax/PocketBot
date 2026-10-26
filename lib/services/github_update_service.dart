@@ -11,6 +11,7 @@ import 'package:pocket_bot/services/asset_download.dart';
 import 'package:pocket_bot/services/github_release_client.dart';
 import 'package:pocket_bot/services/update_proxy.dart';
 import 'package:pocket_bot/services/update_transport.dart';
+import 'package:pocket_bot/services/windows_setup_update.dart';
 import 'package:pocket_bot/utils/logger.dart';
 import 'package:pocket_bot/utils/version_utils.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -88,7 +89,7 @@ class GithubUpdateService {
     if (asset.size > 0 &&
         await finished.exists() &&
         await finished.length() == asset.size &&
-        await _hasZipHeader(finished)) {
+        await _hasExpectedHeader(finished)) {
       onProgress?.call(1);
       return finished;
     }
@@ -200,7 +201,7 @@ class GithubUpdateService {
 
     final size = await partial.length();
     if (!downloadSizeMatches(written: size, assetSize: asset.size) ||
-        !await _hasZipHeader(partial)) {
+        !await _hasExpectedHeader(partial)) {
       await partial.delete();
       throw StateError('Incomplete download $size/${asset.size}');
     }
@@ -238,16 +239,66 @@ class GithubUpdateService {
       }
 
       if (Platform.isWindows) {
-        final result = await OpenFilex.open(file.path);
-        if (result.type == ResultType.done) return true;
-        await Process.run('explorer.exe', ['/select,${file.path}']);
-        return true;
+        return _installWindowsSetup(file);
       }
 
       final result = await OpenFilex.open(file.path);
       return result.type == ResultType.done;
     } catch (e) {
       Logger.error('[Update] Open/install failed: $e');
+      return false;
+    }
+  }
+
+  /// True when this process is the per-user Inno install and can be replaced
+  /// silently. Portable and dev copies return false and open the wizard.
+  Future<bool> runningFromInstalledCopy() async {
+    try {
+      if (!Platform.isWindows) return false;
+      final registered = await queryInnoInstallLocation();
+      return planWindowsSetupUpdate(
+        executablePath: Platform.resolvedExecutable,
+        registeredInstallDir: registered,
+      ).silent;
+    } catch (error) {
+      Logger.warning('[Update] Install location check failed: $error');
+      return false;
+    }
+  }
+
+  Future<bool> _installWindowsSetup(File file) async {
+    final name = file.path.split(RegExp(r'[/\\]')).last;
+    if (!isWindowsSetupFileName(name) || !await _hasPeHeader(file)) {
+      Logger.warning('[Update] Refusing to run a file that is not the setup');
+      return false;
+    }
+
+    final plan = planWindowsSetupUpdate(
+      executablePath: Platform.resolvedExecutable,
+      registeredInstallDir: await queryInnoInstallLocation(),
+    );
+    if (plan.silent) {
+      final installDir = plan.installDir;
+      final relaunchExe = plan.relaunchExe;
+      if (installDir == null || relaunchExe == null) return false;
+      final started = await launchInstalledSetupUpdate(
+        setup: file,
+        installDir: installDir,
+        relaunchExe: relaunchExe,
+        waitingForPid: pid,
+      );
+      if (!started) return false;
+      Logger.info('[Update] Setup helper started; exiting for install');
+      exit(0);
+    }
+
+    final result = await OpenFilex.open(file.path);
+    if (result.type == ResultType.done) return true;
+    try {
+      await Process.start(file.path, const [], mode: ProcessStartMode.detached);
+      return true;
+    } catch (error) {
+      Logger.warning('[Update] Could not open setup: $error');
       return false;
     }
   }
@@ -284,11 +335,25 @@ class GithubUpdateService {
   }
 }
 
-Future<bool> _hasZipHeader(File file) async {
-  if (!await file.exists() || await file.length() < 4) return false;
-  final header = await file.openRead(0, 4).fold<List<int>>(
+Future<List<int>> _fileHeader(File file) async {
+  if (!await file.exists() || await file.length() < 2) return const [];
+  return file.openRead(0, 4).fold<List<int>>(
     <int>[],
     (previous, chunk) => previous..addAll(chunk),
   );
+}
+
+Future<bool> _hasZipHeader(File file) async {
+  return looksLikeZipHeader(await _fileHeader(file));
+}
+
+Future<bool> _hasPeHeader(File file) async {
+  return looksLikePeHeader(await _fileHeader(file));
+}
+
+Future<bool> _hasExpectedHeader(File file) async {
+  final name = file.path.split(RegExp(r'[/\\]')).last;
+  final header = await _fileHeader(file);
+  if (isWindowsSetupFileName(name)) return looksLikePeHeader(header);
   return looksLikeZipHeader(header);
 }

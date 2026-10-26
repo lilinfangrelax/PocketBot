@@ -93,7 +93,7 @@ void main() {
   });
 
   group('GithubRelease.assetFor', () {
-    test('selects apk and windows zip', () {
+    test('selects the apk and ignores a windows zip', () {
       final release = GithubRelease.fromJson(_release(
         tag: 'v1.2.0',
         prerelease: false,
@@ -101,18 +101,21 @@ void main() {
       ));
       expect(release.assetFor(UpdatePlatform.android)?.name,
           'PocketBot-1.2.0.apk');
-      expect(
-        release.assetFor(UpdatePlatform.windows)?.name,
-        'PocketBot-Windows-1.2.0.zip',
-      );
+      expect(release.assetFor(UpdatePlatform.windows), isNull);
     });
 
-    test('windows update keeps the zip when a setup exe is also published', () {
+    test('windows update uses the setup exe', () {
       final release = GithubRelease.fromJson(_release(
         tag: 'v1.2.18-beta',
         prerelease: true,
         assets: [
           _zip('1.2.18-beta'),
+          {
+            'name': 'pocketbot-remote-windows-x64.exe',
+            'browser_download_url':
+                'https://example.com/pocketbot-remote-windows-x64.exe',
+            'size': 1024,
+          },
           {
             'name': 'PocketBot-Windows-1.2.18-beta-Setup.exe',
             'browser_download_url':
@@ -123,9 +126,13 @@ void main() {
       ));
       expect(
         release.assetFor(UpdatePlatform.windows)?.name,
-        'PocketBot-Windows-1.2.18-beta.zip',
+        'PocketBot-Windows-1.2.18-beta-Setup.exe',
       );
       expect(release.assetFor(UpdatePlatform.other), isNull);
+      expect(
+        isWindowsSetupFileName('pocketbot-remote-windows-x64.exe'),
+        isFalse,
+      );
     });
   });
 

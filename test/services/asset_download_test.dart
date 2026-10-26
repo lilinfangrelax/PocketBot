@@ -56,4 +56,9 @@ void main() {
     expect(looksLikeZipHeader([0x50, 0x4b, 0x03, 0x04, 0]), isTrue);
     expect(looksLikeZipHeader([0x3c, 0x68, 0x74, 0x6d]), isFalse);
   });
+
+  test('a windows setup starts with the PE header', () {
+    expect(looksLikePeHeader([0x4d, 0x5a, 0x90, 0x00]), isTrue);
+    expect(looksLikePeHeader([0x50, 0x4b, 0x03, 0x04]), isFalse);
+  });
 }

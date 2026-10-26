@@ -30,7 +30,8 @@ bool responseAppendsFromOffset(int? statusCode) => statusCode == 206;
 /// A resumed body is usable only when it continues at [offset].
 bool contentRangeStartsAt(String? header, int offset) {
   if (header == null || offset < 0) return false;
-  final match = RegExp(r'bytes\s+(\d+)-', caseSensitive: false).firstMatch(header);
+  final match =
+      RegExp(r'bytes\s+(\d+)-', caseSensitive: false).firstMatch(header);
   if (match == null) return false;
   return int.tryParse(match.group(1)!) == offset;
 }
@@ -49,4 +50,9 @@ bool looksLikeZipHeader(List<int> header) {
       header[1] == 0x4b &&
       header[2] == 0x03 &&
       header[3] == 0x04;
+}
+
+/// Windows setup executables start with the PE `MZ` header.
+bool looksLikePeHeader(List<int> header) {
+  return header.length >= 2 && header[0] == 0x4d && header[1] == 0x5a;
 }

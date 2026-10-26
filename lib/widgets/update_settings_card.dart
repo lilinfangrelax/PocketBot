@@ -126,6 +126,9 @@ class UpdateDialogs {
     final ownsService = service == null;
     final updater = service ?? GithubUpdateService();
     try {
+      final replacesInstall = result.platform == UpdatePlatform.windows &&
+          await updater.runningFromInstalledCopy();
+      if (!context.mounted) return;
       final shouldDownload = await showDialog<bool>(
         context: context,
         builder: (context) {
@@ -152,6 +155,14 @@ class UpdateDialogs {
                     child: SingleChildScrollView(child: Text(changelog)),
                   ),
                 ],
+                if (result.platform == UpdatePlatform.windows) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    replacesInstall
+                        ? '安装时会关闭 PocketBot，完成后重新打开。'
+                        : '将打开安装程序，按提示完成安装。',
+                  ),
+                ],
                 if (asset != null) ...[
                   const SizedBox(height: 16),
                   Text(
@@ -171,9 +182,7 @@ class UpdateDialogs {
               if (result.canDownload)
                 ElevatedButton(
                   onPressed: () => Navigator.pop(context, true),
-                  child: Text(
-                    result.platform == UpdatePlatform.android ? '下载并安装' : '下载',
-                  ),
+                  child: const Text('下载并安装'),
                 )
               else
                 ElevatedButton(
@@ -196,7 +205,12 @@ class UpdateDialogs {
         return;
       }
 
-      await _downloadAndInstall(context, result, updater);
+      await _downloadAndInstall(
+        context,
+        result,
+        updater,
+        replacesInstall: replacesInstall,
+      );
     } finally {
       if (ownsService) updater.close();
     }
@@ -205,8 +219,9 @@ class UpdateDialogs {
   static Future<void> _downloadAndInstall(
     BuildContext context,
     UpdateCheckResult result,
-    GithubUpdateService updater,
-  ) async {
+    GithubUpdateService updater, {
+    required bool replacesInstall,
+  }) async {
     final asset = result.platformAsset;
     if (asset == null) return;
 
@@ -256,12 +271,15 @@ class UpdateDialogs {
       final opened = await updater.installOrOpen(file);
       if (!context.mounted) return;
       if (!opened) {
-        showAppNotice(context, '已保存：${file.path}');
+        final saved = '已保存：${file.path}';
+        showAppNotice(
+          context,
+          result.platform == UpdatePlatform.windows ? '无法启动安装程序，$saved' : saved,
+        );
         return;
       }
-
-      if (result.platform == UpdatePlatform.windows) {
-        showAppNotice(context, '已下载，请解压后替换当前安装目录');
+      if (result.platform == UpdatePlatform.windows && !replacesInstall) {
+        showAppNotice(context, '已打开安装程序');
       }
     } catch (e) {
       final detail = formatUpdateError(e);

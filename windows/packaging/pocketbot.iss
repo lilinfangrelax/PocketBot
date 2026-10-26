@@ -1,4 +1,7 @@
 ; PocketBot Windows installer. Built by windows/packaging/package.ps1.
+; The in-app updater downloads this Setup.exe. An installed copy exits, then runs:
+;   Setup.exe /VERYSILENT /NORESTART /CURRENTUSER /DIR={app}
+; [Run] uses skipifsilent, so this script does not launch PocketBot; the updater does.
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
@@ -26,6 +29,7 @@ SolidCompression=yes
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=lowest
+UsePreviousAppDir=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\PocketBot.exe
 CloseApplications=yes
