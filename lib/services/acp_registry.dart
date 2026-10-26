@@ -7,6 +7,7 @@ import 'package:pocketbot_remote/pocketbot_remote.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:pocket_bot/models/message.dart';
+import 'package:pocket_bot/services/custom_acp_agent.dart';
 
 const acpRegistryUrl =
     'https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json';
@@ -232,8 +233,27 @@ Future<GatewayInfo> prepareGatewayLaunch(
   GatewayInfo gateway,
   RemotePlatform platform, {
   Future<List<AcpRegistryAgent>> Function()? loadAgents,
+  Future<List<CustomAcpAgent>> Function()? loadCustomAgents,
 }) async {
   if (gateway.agentId.isEmpty) return gateway;
+  final customId = customAcpLocalId(gateway.agentId);
+  if (customId != null) {
+    final customAgents = await (loadCustomAgents ?? CustomAcpCatalog.load)();
+    final custom = findCustomAcpAgent(customAgents, gateway.agentId);
+    if (custom == null) {
+      throw Exception('CUSTOM_AGENT_MISSING:没有保存自定义代理 $customId');
+    }
+    return gateway.copyWith(
+      command: custom.program,
+      args: custom.args,
+      agentLabel: custom.name,
+      agentVersion: 'custom',
+      archiveUrl: '',
+      archiveSha256: '',
+      launchEnv: custom.env,
+      legacyArgv: const [],
+    );
+  }
   if (kDebugMode && gateway.agentId == 'pocketbot-mock') {
     final command = Platform.environment['POCKETBOT_E2E_MOCK_AGENT'];
     if (command == null || command.isEmpty) {

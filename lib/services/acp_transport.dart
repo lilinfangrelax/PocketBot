@@ -11,6 +11,7 @@ import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/services/acp_file_system.dart';
 import 'package:pocket_bot/services/acp_terminal.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
+import 'package:pocket_bot/services/custom_acp_agent.dart';
 import 'package:pocket_bot/services/remote_helper.dart';
 import 'package:pocket_bot/services/ssh_host_keys.dart';
 import 'package:pocket_bot/utils/logger.dart';
@@ -578,6 +579,14 @@ class _LocalLaunch {
 }
 
 Future<_LocalLaunch> _localLaunch(GatewayInfo target) async {
+  if (isCustomAcpAgentId(target.agentId)) {
+    final resolved = await resolveCustomProgram(target.command);
+    return _LocalLaunch(
+      executable: resolved.executable,
+      args: [...resolved.prefixArgs, ...target.args],
+      runInShell: resolved.runInShell,
+    );
+  }
   if (target.archiveUrl != null && target.archiveUrl!.isNotEmpty) {
     try {
       final cached = await ensureCachedAgent(

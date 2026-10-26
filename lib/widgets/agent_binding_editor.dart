@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:pocket_bot/models/message.dart';
 import 'package:pocket_bot/screens/acp_registry_screen.dart';
-import 'package:pocket_bot/services/acp_registry.dart';
+import 'package:pocket_bot/services/custom_acp_agent.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/theme/fluent_theme.dart';
 
@@ -89,7 +89,7 @@ class _AgentBindingEditorState extends State<AgentBindingEditor> {
   }
 
   Future<void> _pickAgent() async {
-    final picked = await Navigator.push<AcpRegistryAgent>(
+    final picked = await Navigator.push<AcpAgentSelection>(
       context,
       MaterialPageRoute(
         builder: (_) => AcpRegistryScreen(selectedId: _agentId),
@@ -98,7 +98,7 @@ class _AgentBindingEditorState extends State<AgentBindingEditor> {
     if (picked == null) return;
     setState(() {
       _agentId = picked.id;
-      _agentLabel = picked.name;
+      _agentLabel = picked.label;
     });
     _emit();
   }
@@ -161,7 +161,9 @@ class _AgentBindingEditorState extends State<AgentBindingEditor> {
           contentPadding: EdgeInsets.zero,
           leading: const Icon(Icons.smart_toy_outlined),
           title: Text(_agentLabel.isEmpty ? _agentId : _agentLabel),
-          subtitle: const Text('ACP 代理，点按更换'),
+          subtitle: Text(
+            isCustomAcpAgentId(_agentId) ? '自定义 ACP 代理，点按更换' : 'ACP 代理，点按更换',
+          ),
           trailing: const Icon(Icons.chevron_right),
           onTap: _pickAgent,
         ),

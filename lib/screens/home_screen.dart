@@ -10,7 +10,7 @@ import 'package:pocket_bot/screens/acp_registry_screen.dart';
 import 'package:pocket_bot/screens/chat_screen.dart';
 import 'package:pocket_bot/screens/remote_directory_picker.dart';
 import 'package:pocket_bot/screens/settings_screen.dart';
-import 'package:pocket_bot/services/acp_registry.dart';
+import 'package:pocket_bot/services/custom_acp_agent.dart';
 import 'package:pocket_bot/services/connection_manager.dart';
 import 'package:pocket_bot/services/cursor_agent.dart';
 import 'package:pocket_bot/services/ssh_host_keys.dart';
@@ -81,7 +81,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _pickAgent() async {
-    final picked = await Navigator.push<AcpRegistryAgent>(
+    final picked = await Navigator.push<AcpAgentSelection>(
       context,
       MaterialPageRoute(
         builder: (_) => AcpRegistryScreen(selectedId: _agentId),
@@ -90,11 +90,11 @@ class _HomeScreenState extends State<HomeScreen> {
     if (picked == null) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('acp_agent_id', picked.id);
-    await prefs.setString('acp_agent_label', picked.name);
+    await prefs.setString('acp_agent_label', picked.label);
     if (!mounted) return;
     setState(() {
       _agentId = picked.id;
-      _agentLabel = picked.name;
+      _agentLabel = picked.label;
     });
   }
 
@@ -108,7 +108,11 @@ class _HomeScreenState extends State<HomeScreen> {
       child: ListTile(
         leading: const Icon(Icons.smart_toy_outlined),
         title: Text(_agentLabel),
-        subtitle: const Text('ACP Registry，点按更换代理'),
+        subtitle: Text(
+          isCustomAcpAgentId(_agentId)
+              ? '自定义 ACP 代理，点按更换'
+              : 'ACP Registry 或自定义代理，点按更换',
+        ),
         trailing: const Icon(Icons.chevron_right),
         onTap: _pickAgent,
       ),
@@ -903,8 +907,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _passphraseController,
-                  decoration:
-                      const InputDecoration(labelText: '私钥密码（可选）'),
+                  decoration: const InputDecoration(labelText: '私钥密码（可选）'),
                   obscureText: true,
                   onChanged: (value) => _manualPassphrase = value,
                 ),
