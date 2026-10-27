@@ -11,14 +11,14 @@ import 'package:pocket_bot/utils/semver.dart';
 class DevUpdateClient {
   DevUpdateClient({
     required http.Client httpClient,
-    required this.tailnetSuffix,
+    required this.discover,
     required this.currentVersion,
     required this.installedSha256,
     required this.platform,
   }) : _http = httpClient;
 
   final http.Client _http;
-  final Future<String?> Function() tailnetSuffix;
+  final Future<TailnetDiscovery> Function() discover;
   final String Function() currentVersion;
   final String? installedSha256;
   final UpdatePlatform platform;
@@ -32,12 +32,15 @@ class DevUpdateClient {
       );
     }
 
-    final suffix = tailnetSuffixFromText(await tailnetSuffix() ?? '');
+    final found = await discover();
+    final suffix = tailnetSuffixFromText(found.suffix ?? '');
     if (suffix == null) {
-      return const UpdateCheckOutcome(
+      return UpdateCheckOutcome(
         channel: UpdateChannel.dev,
         failure: UpdateCheckFailure.emptyChannel,
-        error: '手机没有连上 Tailscale',
+        error: found.interfaceUp
+            ? '已连上 Tailscale，但没有读到 tailnet 域名'
+            : '手机没有连上 Tailscale',
       );
     }
 

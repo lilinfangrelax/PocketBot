@@ -6,10 +6,12 @@ import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.net.ConnectivityManager
 import android.os.Build
+import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.net.Inet4Address
 
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -20,7 +22,17 @@ class MainActivity : FlutterActivity() {
                     result.notImplemented()
                     return@setMethodCallHandler
                 }
-                result.success(tailnetSearchDomains())
+                try {
+                    result.success(tailnetProbe())
+                } catch (error: Exception) {
+                    Log.w("PocketBot", "tailnet probe failed", error)
+                    result.success(
+                        mapOf(
+                            "domains" to "",
+                            "addresses" to emptyList<String>(),
+                        ),
+                    )
+                }
             }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
@@ -42,18 +54,26 @@ class MainActivity : FlutterActivity() {
             }
     }
 
-    private fun tailnetSearchDomains(): String? {
+    private fun tailnetProbe(): Map<String, Any> {
         val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-            ?: return null
+            ?: return mapOf("domains" to "", "addresses" to emptyList<String>())
         val domains = StringBuilder()
+        val addresses = ArrayList<String>()
         for (network in manager.allNetworks) {
-            val value = manager.getLinkProperties(network)?.domains ?: continue
-            if (value.isBlank()) continue
-            if (domains.isNotEmpty()) domains.append(',')
-            domains.append(value)
+            val props = manager.getLinkProperties(network) ?: continue
+            val value = props.domains
+            if (!value.isNullOrBlank()) {
+                if (domains.isNotEmpty()) domains.append(',')
+                domains.append(value)
+            }
+            for (link in props.linkAddresses) {
+                val address = link.address
+                if (address !is Inet4Address) continue
+                val host = address.hostAddress ?: continue
+                if (host !in addresses) addresses.add(host)
+            }
         }
-        val text = domains.toString()
-        return text.ifBlank { null }
+        return mapOf("domains" to domains.toString(), "addresses" to addresses)
     }
 
     private fun installApk(file: File) {

@@ -8,6 +8,8 @@
     
     <!-- Internet for file uploads -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Tailscale VPN search domain and its 100.64/10 address. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 
     <!-- Install APKs downloaded from GitHub Releases -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>

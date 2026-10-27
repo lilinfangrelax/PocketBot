@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:pocket_bot/config/update_config.dart';
 import 'package:pocket_bot/services/asset_download.dart';
+import 'package:pocket_bot/services/dev_update.dart';
 import 'package:pocket_bot/services/dev_update_client.dart';
 import 'package:pocket_bot/services/github_release_client.dart';
 import 'package:pocket_bot/services/tailnet_suffix.dart';
@@ -20,6 +21,17 @@ import 'package:url_launcher/url_launcher.dart';
 
 export 'package:pocket_bot/services/github_release_client.dart';
 
+Future<TailnetDiscovery> Function() _bindTailnetDiscovery({
+  Future<String?> Function()? tailnetSuffix,
+  Future<bool> Function()? tailscaleUp,
+}) {
+  if (tailnetSuffix == null && tailscaleUp == null) return discoverTailnet;
+  return () async => TailnetDiscovery(
+        suffix: tailnetSuffix == null ? null : await tailnetSuffix(),
+        interfaceUp: tailscaleUp != null && await tailscaleUp(),
+      );
+}
+
 class GithubUpdateService {
   GithubUpdateService({
     http.Client? httpClient,
@@ -29,11 +41,15 @@ class GithubUpdateService {
     String Function()? currentVersion,
     UpdatePlatform Function()? platform,
     Future<String?> Function()? tailnetSuffix,
+    Future<bool> Function()? tailscaleUp,
     String? Function()? installedDevSha256,
   })  : _externalHttp = httpClient,
         _currentVersion = currentVersion ?? _defaultVersion,
         _platform = platform ?? currentPlatform,
-        _tailnetSuffix = tailnetSuffix ?? discoverTailnetSuffix,
+        _discover = _bindTailnetDiscovery(
+          tailnetSuffix: tailnetSuffix,
+          tailscaleUp: tailscaleUp,
+        ),
         _installedDevSha256 =
             installedDevSha256 ?? (() => UpdateConfig.installedDevSha256),
         _client = GithubReleaseClient(
@@ -49,7 +65,7 @@ class GithubUpdateService {
   final http.Client? _externalHttp;
   final String Function() _currentVersion;
   final UpdatePlatform Function() _platform;
-  final Future<String?> Function() _tailnetSuffix;
+  final Future<TailnetDiscovery> Function() _discover;
   final String? Function() _installedDevSha256;
   final GithubReleaseClient _client;
   final Dio _dio;
@@ -100,7 +116,7 @@ class GithubUpdateService {
     final httpClient = _externalHttp ?? createUpdateHttpClient();
     final dev = DevUpdateClient(
       httpClient: httpClient,
-      tailnetSuffix: _tailnetSuffix,
+      discover: _discover,
       currentVersion: _currentVersion,
       installedSha256: _installedDevSha256(),
       platform: _platform(),

@@ -29,17 +29,131 @@ String? readPubspecVersion(String pubspec) {
 
 String sha256Hex(List<int> bytes) => sha256.convert(bytes).toString();
 
-/// A MagicDNS suffix such as `example.ts.net`. Hostnames are rejected.
+/// A MagicDNS suffix such as `example.ts.net`. A machine name is reduced to
+/// its tailnet suffix; `ts.net` alone is not enough.
 String? tailnetSuffixFromDomains(Iterable<String> domains) {
   for (final domain in domains) {
-    for (final part in domain.split(RegExp(r'[\r\n,;]+'))) {
+    for (final part in domain.split(RegExp(r'[\s,;]+'))) {
       var cleaned = part.trim().toLowerCase();
-      cleaned = cleaned.replaceFirst(RegExp(r'^[-*\s]+'), '');
+      cleaned = cleaned.replaceFirst(RegExp(r'^[~*\-]+'), '');
       cleaned = cleaned.replaceAll(RegExp(r'^\.+|\.+$'), '');
-      if (_tailnetSuffix.hasMatch(cleaned)) return cleaned;
+      final suffix = tailnetSuffixFromName(cleaned);
+      if (suffix != null) return suffix;
     }
   }
   return null;
+}
+
+/// `example.ts.net`, or `phone.example.ts.net` reduced to that suffix.
+String? tailnetSuffixFromName(String name) {
+  final cleaned =
+      name.trim().toLowerCase().replaceAll(RegExp(r'^\.+|\.+$'), '');
+  if (_tailnetSuffix.hasMatch(cleaned)) return cleaned;
+  final labels = cleaned.split('.').where((label) => label.isNotEmpty).toList();
+  if (labels.length < 4) return null;
+  if (labels[labels.length - 1] != 'net' || labels[labels.length - 2] != 'ts') {
+    return null;
+  }
+  final suffix = labels.sublist(labels.length - 3).join('.');
+  if (!_tailnetSuffix.hasMatch(suffix)) return null;
+  return suffix;
+}
+
+/// Tailscale addresses sit in 100.64.0.0/10. 100.100.100.100 is MagicDNS
+/// itself, not this phone.
+bool isTailscaleIPv4(String ip) {
+  final parts = ip.split('.');
+  if (parts.length != 4) return false;
+  final numbers = <int>[];
+  for (final part in parts) {
+    if (part.isEmpty || part.length > 3) return false;
+    final value = int.tryParse(part);
+    if (value == null || value < 0 || value > 255) return false;
+    if (part.length > 1 && part.startsWith('0')) return false;
+    numbers.add(value);
+  }
+  if (numbers[0] != 100 || numbers[1] < 64 || numbers[1] > 127) return false;
+  if (numbers[1] == 100 && numbers[2] == 100 && numbers[3] == 100) {
+    return false;
+  }
+  return true;
+}
+
+/// Accepts a dotted Tailscale address or an IPv4-mapped form such as
+/// `::ffff:100.73.210.105`.
+String? tailscaleIpv4FromAddress(String raw) {
+  var text = raw.trim().toLowerCase();
+  if (text.startsWith('[') && text.contains(']')) {
+    text = text.substring(1, text.indexOf(']'));
+  }
+  final zone = text.indexOf('%');
+  if (zone >= 0) text = text.substring(0, zone);
+  if (text.startsWith('::ffff:')) {
+    final rest = text.substring('::ffff:'.length);
+    if (isTailscaleIPv4(rest)) return rest;
+    final halves = rest.split(':');
+    if (halves.length == 2) {
+      final high = int.tryParse(halves[0], radix: 16);
+      final low = int.tryParse(halves[1], radix: 16);
+      if (high != null && low != null && high <= 0xffff && low <= 0xffff) {
+        final ip = '${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}';
+        if (isTailscaleIPv4(ip)) return ip;
+      }
+    }
+    return null;
+  }
+  if (text.contains(':')) text = text.split(':').first;
+  if (isTailscaleIPv4(text)) return text;
+  return null;
+}
+
+class TailnetDiscovery {
+  const TailnetDiscovery({this.suffix, this.interfaceUp = false});
+
+  final String? suffix;
+
+  /// True when a Tailscale address or MagicDNS itself was reachable.
+  final bool interfaceUp;
+}
+
+/// Search domains win. Otherwise the phone's 100.x address is reversed.
+Future<TailnetDiscovery> resolveTailnetSuffix({
+  required String domains,
+  required Iterable<String> addresses,
+  required Future<String?> Function(String ipv4) ptrLookup,
+  Future<String?> Function()? observeLocalTailscaleAddress,
+  Future<bool> Function()? magicDnsReachable,
+}) async {
+  final fromDomains = tailnetSuffixFromText(domains);
+  if (fromDomains != null) {
+    return TailnetDiscovery(suffix: fromDomains, interfaceUp: true);
+  }
+
+  final candidates = <String>[];
+  void add(String? ip) {
+    final cleaned = tailscaleIpv4FromAddress(ip ?? '');
+    if (cleaned == null || candidates.contains(cleaned)) return;
+    candidates.add(cleaned);
+  }
+
+  for (final address in addresses) {
+    add(address);
+  }
+  if (candidates.isEmpty && observeLocalTailscaleAddress != null) {
+    add(await observeLocalTailscaleAddress());
+  }
+
+  for (final ip in candidates) {
+    final suffix = tailnetSuffixFromName(await ptrLookup(ip) ?? '');
+    if (suffix != null) {
+      return TailnetDiscovery(suffix: suffix, interfaceUp: true);
+    }
+  }
+  var interfaceUp = candidates.isNotEmpty;
+  if (!interfaceUp && magicDnsReachable != null) {
+    interfaceUp = await magicDnsReachable();
+  }
+  return TailnetDiscovery(interfaceUp: interfaceUp);
 }
 
 /// Parses `tailscale dns status` or a search-domain list.
