@@ -85,15 +85,16 @@ String _psSingleQuote(String value) => "'${value.replaceAll("'", "''")}'";
 
 String _windowsProbeScript(String version) {
   final exe = _psSingleQuote('.pocketbot\\pocketbot-remote-$version.exe');
-  final expected = _psSingleQuote(version);
   // A half-downloaded exe must read as MISSING, not abort the script.
+  // Any printed version is enough: a dev build may be newer than the newest
+  // published helper, and that helper is stored under this app's filename.
   return "\$ProgressPreference = 'SilentlyContinue'; "
       "\$p = Join-Path \$env:USERPROFILE $exe; "
       "\$ver = ''; "
       'if (Test-Path -LiteralPath \$p) { '
       'try { \$ver = (& \$p version 2>\$null | Out-String).Trim() } '
       "catch { \$ver = '' } }; "
-      "if (\$ver -eq $expected) { Write-Output ('READY ' + \$p) } "
+      "if (\$ver) { Write-Output ('READY ' + \$p) } "
       "else { Write-Output 'MISSING' }";
 }
 
@@ -122,7 +123,7 @@ String helperProbeCommand(RemotePlatform platform, String version) {
   }
   return "sh -c 'p=\"\$HOME/.pocketbot/pocketbot-remote-$version\"; "
       "ver=\"\"; if [ -x \"\$p\" ]; then ver=\$(\"\$p\" version 2>/dev/null || true); fi; "
-      "if [ \"\$ver\" = \"$version\" ]; then echo READY \"\$p\"; else echo MISSING; fi'";
+      "if [ -n \"\$ver\" ]; then echo READY \"\$p\"; else echo MISSING; fi'";
 }
 
 String helperRemoteDownloadCommand({
@@ -144,18 +145,63 @@ String helperRemoteDownloadCommand({
 }
 
 /// Install `pocketbot-remote` for [version] and return its remote path.
+///
+/// [latestPublishedVersion] is used when this app version has no GitHub
+/// release, which is normal for a build installed from the dev machine.
 Future<String> ensureRemoteHelper({
   required RemotePlatform platform,
   required String version,
   required Future<String> Function(String command) exec,
   required Future<void> Function(String remotePath, List<int> bytes) upload,
   required Future<List<int>> Function(Uri url) download,
+  Future<String?> Function()? latestPublishedVersion,
 }) async {
   final probe = helperProbeCommand(platform, version);
   final existing = readyHelperPath(await exec(probe));
   if (existing != null) return existing;
 
-  final url = releaseAssetUrl(version: version, platform: platform);
+  final exact = releaseAssetUrl(version: version, platform: platform);
+  final installedExact = await _installFromUrl(
+    platform: platform,
+    version: version,
+    url: exact,
+    probe: probe,
+    exec: exec,
+    upload: upload,
+    download: download,
+  );
+  if (installedExact != null) return installedExact;
+
+  final latest =
+      latestPublishedVersion == null ? null : await latestPublishedVersion();
+  final fallback = latest == null || latest.isEmpty || latest == version
+      ? null
+      : releaseAssetUrl(version: latest, platform: platform);
+  if (fallback != null) {
+    Logger.info('[remote] v$version has no helper, using v$latest');
+    final installedFallback = await _installFromUrl(
+      platform: platform,
+      version: version,
+      url: fallback,
+      probe: probe,
+      exec: exec,
+      upload: upload,
+      download: download,
+    );
+    if (installedFallback != null) return installedFallback;
+  }
+  throw Exception('HELPER_INSTALL_FAILED:没有找到 v$version 的远程服务');
+}
+
+Future<String?> _installFromUrl({
+  required RemotePlatform platform,
+  required String version,
+  required String url,
+  required String probe,
+  required Future<String> Function(String command) exec,
+  required Future<void> Function(String remotePath, List<int> bytes) upload,
+  required Future<List<int>> Function(Uri url) download,
+}) async {
   Logger.info('[remote] helper $version missing, asking the host to download');
   try {
     await exec(helperRemoteDownloadCommand(
@@ -170,10 +216,14 @@ Future<String> ensureRemoteHelper({
   if (downloaded != null) return downloaded;
 
   Logger.info('[remote] downloading helper on this machine, then uploading');
-  final bytes = await download(Uri.parse(url));
-  if (bytes.isEmpty) {
-    throw Exception('HELPER_INSTALL_FAILED:远程服务安装包是空的');
+  List<int> bytes;
+  try {
+    bytes = await download(Uri.parse(url));
+  } catch (error) {
+    Logger.warning('[remote] helper download failed: $url $error');
+    return null;
   }
+  if (bytes.isEmpty) return null;
   final remotePath = await _uploadedHelperPath(
     platform: platform,
     version: version,
@@ -184,9 +234,7 @@ Future<String> ensureRemoteHelper({
   if (!platform.isWindows) {
     await exec("chmod +x ${_shQuote(remotePath)}");
   }
-  final installed = readyHelperPath(await exec(probe));
-  if (installed != null) return installed;
-  throw Exception('HELPER_INSTALL_FAILED:远程服务已上传，但版本校验没有通过');
+  return readyHelperPath(await exec(probe));
 }
 
 Future<String> _uploadedHelperPath({
@@ -429,7 +477,31 @@ Future<String> _installHelper({
     ),
     upload: (path, bytes) => uploadRemoteFile(client, path, bytes),
     download: downloadReleaseAsset,
+    latestPublishedVersion: () => latestPublishedHelperVersion(platform),
   );
+}
+
+Future<String?> latestPublishedHelperVersion(RemotePlatform platform) async {
+  final dio = _releaseClient();
+  try {
+    final response = await dio.get<String>(
+      'https://api.github.com/repos/lilinfangrelax/PocketBot/releases?per_page=20',
+      options: Options(
+        responseType: ResponseType.plain,
+        headers: const {
+          'Accept': 'application/vnd.github+json',
+          'User-Agent': 'PocketBot',
+        },
+      ),
+    );
+    final decoded = jsonDecode(response.data ?? '[]');
+    return newestReleaseVersionWithAsset(decoded, platform.assetName);
+  } catch (error) {
+    Logger.warning('[remote] release list failed: $error');
+    return null;
+  } finally {
+    dio.close();
+  }
 }
 
 /// Command line the SSH session should execute for this gateway.

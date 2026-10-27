@@ -146,6 +146,41 @@ void main() {
         uploadedTo, r'C:\Users\me\.pocketbot\pocketbot-remote-1.2.5-beta.exe');
   });
 
+  test('a dev build uses the newest published helper', () async {
+    final urls = <String>[];
+    var probes = 0;
+    final path = await ensureRemoteHelper(
+      platform: linux,
+      version: '1.2.32-beta',
+      latestPublishedVersion: () async => '1.2.31-beta',
+      exec: (command) async {
+        if (command.contains('echo READY')) {
+          probes += 1;
+          if (probes < 4) return 'MISSING\n';
+          return 'READY /home/me/.pocketbot/pocketbot-remote-1.2.32-beta\n';
+        }
+        if (command.contains('curl')) throw Exception('404');
+        if (command.startsWith('printf')) return '/home/me';
+        return '';
+      },
+      upload: (remotePath, bytes) async {
+        expect(remotePath, '/home/me/.pocketbot/pocketbot-remote-1.2.32-beta');
+        expect(bytes, [7]);
+      },
+      download: (uri) async {
+        urls.add(uri.toString());
+        if (uri.toString().contains('/v1.2.32-beta/')) {
+          throw Exception('HELPER_INSTALL_FAILED:下载远程服务失败 (404)');
+        }
+        return [7];
+      },
+    );
+
+    expect(path, '/home/me/.pocketbot/pocketbot-remote-1.2.32-beta');
+    expect(urls.first, contains('/v1.2.32-beta/'));
+    expect(urls.last, contains('/v1.2.31-beta/'));
+  });
+
   test('Windows scripts survive a broken helper and stay quiet', () {
     final probe = powershellScript(helperProbeCommand(windows, '1.2.15-beta'));
     expect(probe, contains(r"$ProgressPreference = 'SilentlyContinue'"));
@@ -179,14 +214,19 @@ void main() {
 
     test('drops progress-only CLIXML', () {
       expect(
-        cleanRemoteStderr('#< CLIXML\n<Objs Version="1.1.0.1"><Obj S="progress"/></Objs>'),
+        cleanRemoteStderr(
+            '#< CLIXML\n<Objs Version="1.1.0.1"><Obj S="progress"/></Objs>'),
         '',
       );
-      expect(cleanRemoteStderr('#< CLIXML\n<Objs Version="1.1.0.1"><Obj S="progre'), '');
+      expect(
+          cleanRemoteStderr(
+              '#< CLIXML\n<Objs Version="1.1.0.1"><Obj S="progre'),
+          '');
     });
 
     test('leaves ordinary stderr alone', () {
-      expect(cleanRemoteStderr('bash: agent: not found'), 'bash: agent: not found');
+      expect(cleanRemoteStderr('bash: agent: not found'),
+          'bash: agent: not found');
     });
   });
 }

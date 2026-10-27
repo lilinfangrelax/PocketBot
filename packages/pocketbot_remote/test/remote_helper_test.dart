@@ -40,6 +40,27 @@ void main() {
       'https://github.com/lilinfangrelax/PocketBot/releases/download/v1.2.5-beta/pocketbot-remote-linux-x64',
     );
     expect(
+      newestReleaseVersionWithAsset(
+        [
+          {
+            'tag_name': 'v1.2.32-beta',
+            'draft': false,
+            'assets': [
+              {'name': 'PocketBot-1.2.32-beta.apk'},
+            ],
+          },
+          {
+            'tag_name': 'v1.2.31-beta',
+            'assets': [
+              {'name': 'pocketbot-remote-linux-x64'},
+            ],
+          },
+        ],
+        'pocketbot-remote-linux-x64',
+      ),
+      '1.2.31-beta',
+    );
+    expect(
       remoteAgentSessionId(
         connectionId: 'ssh|me@host:22',
         agentId: 'gemini',

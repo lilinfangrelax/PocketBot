@@ -87,6 +87,27 @@ String releaseAssetUrl({
   return 'https://github.com/$owner/$repo/releases/download/$tag/${platform.assetName}';
 }
 
+/// Newest GitHub release, in list order, that contains [assetName].
+///
+/// A dev build can be ahead of the tags that were actually published. The
+/// helper from the newest release is still new enough to start a session.
+String? newestReleaseVersionWithAsset(Object? decoded, String assetName) {
+  if (decoded is! List || assetName.isEmpty) return null;
+  for (final item in decoded) {
+    if (item is! Map || item['draft'] == true) continue;
+    final assets = item['assets'];
+    if (assets is! List) continue;
+    final found = assets.any(
+      (asset) => asset is Map && asset['name']?.toString() == assetName,
+    );
+    if (!found) continue;
+    final tag = item['tag_name']?.toString().trim() ?? '';
+    if (tag.length < 2 || !tag.startsWith('v')) continue;
+    return tag.substring(1);
+  }
+  return null;
+}
+
 /// Stable id for the agent process kept by the remote daemon.
 String remoteAgentSessionId({
   required String connectionId,
