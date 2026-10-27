@@ -263,10 +263,18 @@ class GithubUpdateService {
     }
 
     final size = await partial.length();
-    if (!downloadSizeMatches(written: size, assetSize: asset.size) ||
-        !await _hasExpectedHeader(partial)) {
-      await partial.delete();
-      throw StateError('Incomplete download $size/${asset.size}');
+    switch (judgePartialDownload(
+      size: size,
+      assetSize: asset.size,
+      headerMatches: await _headerMatches(partial),
+    )) {
+      case PartialDownloadDisposition.resume:
+        throw StateError('Incomplete download $size/${asset.size}');
+      case PartialDownloadDisposition.discard:
+        if (await partial.exists()) await partial.delete();
+        throw StateError('Rejected download $size/${asset.size}');
+      case PartialDownloadDisposition.accept:
+        break;
     }
     if (await finished.exists()) await finished.delete();
     final saved = await partial.rename(finished.path);
@@ -415,8 +423,17 @@ Future<bool> _hasPeHeader(File file) async {
 }
 
 Future<bool> _hasExpectedHeader(File file) async {
-  final name = file.path.split(RegExp(r'[/\\]')).last;
+  return await _headerMatches(file) != false;
+}
+
+/// Null means the file does not yet contain a full signature.
+Future<bool?> _headerMatches(File file) async {
+  final name = downloadAssetFileName(file.path);
   final header = await _fileHeader(file);
-  if (isWindowsSetupFileName(name)) return looksLikePeHeader(header);
+  if (isWindowsSetupFileName(name)) {
+    if (header.length < 2) return null;
+    return looksLikePeHeader(header);
+  }
+  if (header.length < 4) return null;
   return looksLikeZipHeader(header);
 }

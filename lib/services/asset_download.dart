@@ -43,6 +43,38 @@ bool downloadSizeMatches({required int written, required int assetSize}) {
   return written == assetSize;
 }
 
+/// `.partial` is only the in-progress suffix. The asset type comes from the
+/// name underneath it, such as `Setup.exe.partial`.
+String downloadAssetFileName(String pathOrName) {
+  var name = pathOrName.split(RegExp(r'[/\\]')).last;
+  const suffix = '.partial';
+  if (name.toLowerCase().endsWith(suffix)) {
+    name = name.substring(0, name.length - suffix.length);
+  }
+  return name;
+}
+
+enum PartialDownloadDisposition { accept, resume, discard }
+
+/// A short file is resumed. A full file with the wrong header is discarded.
+///
+/// [headerMatches] is null when the file is too short to recognize.
+PartialDownloadDisposition judgePartialDownload({
+  required int size,
+  required int assetSize,
+  required bool? headerMatches,
+}) {
+  if (size <= 0 || (assetSize > 0 && size > assetSize)) {
+    return PartialDownloadDisposition.discard;
+  }
+  if (assetSize > 0 && size < assetSize) {
+    if (headerMatches == false) return PartialDownloadDisposition.discard;
+    return PartialDownloadDisposition.resume;
+  }
+  if (headerMatches == false) return PartialDownloadDisposition.discard;
+  return PartialDownloadDisposition.accept;
+}
+
 /// APK and zip files start with the local file header `PK\x03\x04`.
 bool looksLikeZipHeader(List<int> header) {
   return header.length >= 4 &&

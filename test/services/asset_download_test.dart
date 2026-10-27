@@ -1,4 +1,5 @@
 import 'package:pocket_bot/services/asset_download.dart';
+import 'package:pocket_bot/services/github_release_client.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -60,5 +61,36 @@ void main() {
   test('a windows setup starts with the PE header', () {
     expect(looksLikePeHeader([0x4d, 0x5a, 0x90, 0x00]), isTrue);
     expect(looksLikePeHeader([0x50, 0x4b, 0x03, 0x04]), isFalse);
+  });
+
+  test('a setup partial keeps its exe name for the header check', () {
+    final name = downloadAssetFileName(
+      r'C:\updates\PocketBot-Windows-1.2.29-beta-Setup.exe.partial',
+    );
+    expect(name, 'PocketBot-Windows-1.2.29-beta-Setup.exe');
+    expect(isWindowsSetupFileName(name), isTrue);
+    expect(
+      judgePartialDownload(
+        size: 100,
+        assetSize: 100,
+        headerMatches: looksLikePeHeader([0x4d, 0x5a, 0x90, 0x00]),
+      ),
+      PartialDownloadDisposition.accept,
+    );
+  });
+
+  test('a short valid partial is resumed instead of deleted', () {
+    expect(
+      judgePartialDownload(size: 90, assetSize: 100, headerMatches: true),
+      PartialDownloadDisposition.resume,
+    );
+    expect(
+      judgePartialDownload(size: 90, assetSize: 100, headerMatches: false),
+      PartialDownloadDisposition.discard,
+    );
+    expect(
+      judgePartialDownload(size: 100, assetSize: 100, headerMatches: false),
+      PartialDownloadDisposition.discard,
+    );
   });
 }
