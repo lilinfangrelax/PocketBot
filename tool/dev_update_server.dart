@@ -12,8 +12,13 @@ import 'package:pocket_bot/services/dev_update.dart';
 ///   dart run tool/dev_update_server.dart --build
 Future<void> main(List<String> args) async {
   final build = args.contains('--build');
+  var port = devUpdateLocalPort;
   String? apkArg;
   for (final arg in args) {
+    if (arg.startsWith('--port=')) {
+      port = int.parse(arg.substring('--port='.length));
+      continue;
+    }
     if (!arg.startsWith('-')) {
       apkArg = arg;
       break;
@@ -61,28 +66,28 @@ Future<void> main(List<String> args) async {
 
   final server = await HttpServer.bind(
     InternetAddress.loopbackIPv4,
-    devUpdateLocalPort,
+    port,
   );
   server.listen((request) {
     unawaited(_handle(request, apk, length, manifestBytes));
   });
 
   stdout.writeln('已发布 $version（${apk.path}）');
-  stdout.writeln('本机 http://127.0.0.1:$devUpdateLocalPort/update.json');
+  stdout.writeln('本机 http://127.0.0.1:$port/update.json');
 
   final serve = await Process.run('tailscale', [
     'serve',
     '--bg',
     '--https=443',
     '--yes',
-    'http://127.0.0.1:$devUpdateLocalPort',
+    'http://127.0.0.1:$port',
   ]);
   final shortName = await Process.run('tailscale', [
     'serve',
     '--bg',
     '--http=80',
     '--yes',
-    'http://127.0.0.1:$devUpdateLocalPort',
+    'http://127.0.0.1:$port',
   ]);
   stdout.write(shortName.stdout);
   stderr.write(shortName.stderr);
